@@ -1,0 +1,41 @@
+[project]
+name = "honesty-evals"
+version = "0.1.0"
+description = "Honesty evaluations for steered LLMs: AmongUs, AuditBench, MASK, Emergent Misalignment, and the generalized honesty test — all served through a steering-enabled vLLM fork."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "torch",
+    "transformers",
+    "pyyaml",
+    "fastapi",
+    "uvicorn",
+    "httpx",
+    "pandas",
+    "numpy",
+    "scipy",
+    "matplotlib",
+    "tqdm",
+    "peft",
+    "python-dotenv",
+    "huggingface_hub",
+    "datasets",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+]
+
+[project.scripts]
+honesty-evals = "honesty_evals.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["honesty_evals*"]
+
+[tool.setuptools.package-data]
+"honesty_evals.core.judge" = ["prompts/*.yaml"]

@@ -216,3 +216,16 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# --- honesty_evals repo-specific ---
+results/
+plots/
+logs/
+runs/
+*.pt
+.env
+# MASK experiment outputs (raw inputs in data/mask/raw/ ARE committed)
+data/mask/json_data/
+# vendored auditing-agents committed outputs must never come back
+vendor/auditing-agents/agent_outputs*/
+vendor/auditing-agents/.cache/
