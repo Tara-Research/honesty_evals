@@ -1,0 +1,116 @@
+# =====================================================================================
+# Honesty steering config — CAA (contrastive activation addition) vectors.
+# Source: persona_playground configs/caa/config_honesty.yaml (copied 2026-07-25).
+# Only the meta-llama_Llama-3.3-70B-Instruct and Qwen_Qwen3.6-27B sections were
+# carried over; other models (Qwen_Qwen3-32B, ...) can be re-added by copying
+# their sections from persona_playground.
+# =====================================================================================
+
+# ===== VECTOR PATHS & DATA =====
+
+generation_defaults:
+  temperature: 0.6
+  top_p: 0.9
+  min_tokens: 1
+  batch_size: 100
+  max_tokens: 1024
+  enable_thinking: False
+
+common_steering_config_meta-llama_Llama-3.3-70B-Instruct_fever:
+  vector_path: "caa/meta-llama_Llama-3.3-70B-Instruct/honesty/fever/open_gen/honesty_fever_steering_vector_ABLATE_honest_REFUTES_to_SUPPORTS_meta-llama_Llama-3.3-70B-Instruct.pt"
+  neg_embeddings_path: "caa/meta-llama_Llama-3.3-70B-Instruct/honesty/fever/open_gen/honesty_fever_dishonest_all_embeddings_ABLATE_honest_REFUTES_to_SUPPORTS_meta-llama_Llama-3.3-70B-Instruct.pt"
+  pos_embeddings_path: "caa/meta-llama_Llama-3.3-70B-Instruct/honesty/fever/open_gen/honesty_fever_honest_all_embeddings_ABLATE_honest_REFUTES_to_SUPPORTS_meta-llama_Llama-3.3-70B-Instruct.pt"
+  vector_path_label_only: "caa/honesty/honesty_steering_vector_label_only.pt"
+  neg_emb_response_all_path: "caa/meta-llama_Llama-3.3-70B-Instruct/honesty/fever/open_gen/ragged_per_token/honesty_fever_dishonest_all_token_embeddings_ragged_ABLATE_honest_REFUTES_to_SUPPORTS_meta-llama_Llama-3.3-70B-Instruct.pt"
+  pos_emb_response_all_path: "caa/meta-llama_Llama-3.3-70B-Instruct/honesty/fever/open_gen/ragged_per_token/honesty_fever_honest_all_token_embeddings_ragged_ABLATE_honest_REFUTES_to_SUPPORTS_meta-llama_Llama-3.3-70B-Instruct.pt"
+  neg_embeddings_path_label_only: "caa/honesty/honesty_dishonest_all_embeddings_label_only.pt"
+  pos_embeddings_path_label_only: "caa/honesty/honesty_honest_all_embeddings_label_only.pt"
+  data_path: "honesty/test/fever/conversation_data_honesty_generated_FEVER_test_20.json"
+
+common_steering_config_meta-llama_Llama-3.3-70B-Instruct_prd:
+  vector_path: "caa/meta-llama_Llama-3.3-70B-Instruct/honesty/prd/50_tok/honesty_prd_steering_vector_resp50tok_PLUS_eos_meta-llama_Llama-3.3-70B-Instruct.pt"
+  neg_embeddings_path: "caa/meta-llama_Llama-3.3-70B-Instruct/honesty/prd/50_tok/honesty_prd_dishonest_all_embeddings_resp50tok_PLUS_eos_meta-llama_Llama-3.3-70B-Instruct.pt"
+  pos_embeddings_path: "caa/meta-llama_Llama-3.3-70B-Instruct/honesty/prd/50_tok/honesty_prd_honest_all_embeddings_resp50tok_PLUS_eos_meta-llama_Llama-3.3-70B-Instruct.pt"
+  data_path: "honesty/test/prd/honesty_prd_test_20.json"
+
+common_steering_config_meta-llama_Llama-3.3-70B-Instruct_diverse_with_sycophancy:
+  vector_path: "caa/meta-llama_Llama-3.3-70B-Instruct/honesty/diverse_with_sycophancy/all_tokens/honesty_diverse_with_sycophancy_steering_vector_meta-llama_Llama-3.3-70B-Instruct.pt"
+  neg_embeddings_path: "caa/meta-llama_Llama-3.3-70B-Instruct/honesty/diverse_with_sycophancy/all_tokens/honesty_diverse_with_sycophancy_dishonest_all_embeddings_meta-llama_Llama-3.3-70B-Instruct.pt"
+  pos_embeddings_path: "caa/meta-llama_Llama-3.3-70B-Instruct/honesty/diverse_with_sycophancy/all_tokens/honesty_diverse_with_sycophancy_honest_all_embeddings_meta-llama_Llama-3.3-70B-Instruct.pt"
+  neg_emb_response_all_path: "caa/meta-llama_Llama-3.3-70B-Instruct/honesty/diverse_with_sycophancy/all_tokens/ragged_per_token/honesty_diverse_with_sycophancy_dishonest_all_token_embeddings_ragged_meta-llama_Llama-3.3-70B-Instruct.pt"
+  pos_emb_response_all_path: "caa/meta-llama_Llama-3.3-70B-Instruct/honesty/diverse_with_sycophancy/all_tokens/ragged_per_token/honesty_diverse_with_sycophancy_honest_all_token_embeddings_ragged_meta-llama_Llama-3.3-70B-Instruct.pt"
+  data_path: "honesty/test/diverse_with_sycophancy/diverse_with_sycophancy_test_scenarios.json"
+
+common_steering_config_meta-llama_Llama-3.3-70B-Instruct_generalized:
+  vector_path: "caa/meta-llama_Llama-3.3-70B-Instruct/honesty/generalized/all_tokens/honesty_generalized_steering_vector_meta-llama_Llama-3.3-70B-Instruct.pt"
+  neg_embeddings_path: "caa/meta-llama_Llama-3.3-70B-Instruct/honesty/generalized/all_tokens/honesty_generalized_dishonest_all_embeddings_meta-llama_Llama-3.3-70B-Instruct.pt"
+  pos_embeddings_path: "caa/meta-llama_Llama-3.3-70B-Instruct/honesty/generalized/all_tokens/honesty_generalized_honest_all_embeddings_meta-llama_Llama-3.3-70B-Instruct.pt"
+  neg_emb_response_all_path: "caa/meta-llama_Llama-3.3-70B-Instruct/honesty/generalized/all_tokens/ragged_per_token/honesty_generalized_dishonest_all_token_embeddings_ragged_meta-llama_Llama-3.3-70B-Instruct.pt"
+  pos_emb_response_all_path: "caa/meta-llama_Llama-3.3-70B-Instruct/honesty/generalized/all_tokens/ragged_per_token/honesty_generalized_honest_all_token_embeddings_ragged_meta-llama_Llama-3.3-70B-Instruct.pt"
+  data_path: "honesty/test/generalized/v4/generalized_honesty_test_scenarios.json"
+
+common_steering_config_meta-llama_Llama-3.3-70B-Instruct_sycophancy:
+  vector_path: "caa/meta-llama_Llama-3.3-70B-Instruct/sycophancy/diverse/all_tokens/sycophancy_diverse_steering_vector_meta-llama_Llama-3.3-70B-Instruct.pt"
+  neg_embeddings_path: "caa/meta-llama_Llama-3.3-70B-Instruct/sycophancy/diverse/all_tokens/sycophancy_diverse_dishonest_all_embeddings_meta-llama_Llama-3.3-70B-Instruct.pt"
+  pos_embeddings_path: "caa/meta-llama_Llama-3.3-70B-Instruct/sycophancy/diverse/all_tokens/sycophancy_diverse_honest_all_embeddings_meta-llama_Llama-3.3-70B-Instruct.pt"
+
+# v2 self-report (response_avg CAA vector) — for the CAA-vs-LR direction-equivalence cosine.
+common_steering_config_meta-llama_Llama-3.3-70B-Instruct_self_report_experimental:
+  vector_path: "caa/meta-llama_Llama-3.3-70B-Instruct/honesty/self_report_experimental/all_tokens/honesty_self_report_experimental_steering_vector_response_avg_meta-llama_Llama-3.3-70B-Instruct.pt"
+
+common_steering_config_Qwen_Qwen3.6-27B_self_report_experimental:
+  vector_path: "caa/Qwen_Qwen3.6-27B/honesty/self_report_experimental/all_tokens/honesty_self_report_experimental_steering_vector_response_avg_Qwen_Qwen3.6-27B.pt"
+
+
+# ===== BEST LAYERS (shared by single-turn and multi-turn) =====
+
+best_layer_meta-llama_Llama-3.3-70B-Instruct_fever:
+  all_token_mode:
+    swfc:
+      layer: 28
+      coefficient: 4.0
+    sttp:
+      layer: 28
+      coefficient: 24.0
+    stmp:
+      layer: 28
+      coefficient: 32.0
+    baseline_layer_projection_activation:
+      layer: 28
+  response_mode:
+    swfc:
+      layer: 31
+      coefficient: 5.0
+    sttp:
+      layer: 21
+      coefficient: 18.0
+    stmp:
+      layer: 37
+      coefficient: 32.0
+    baseline_layer_projection_activation:
+      layer: 21
+best_layer_meta-llama_Llama-3.3-70B-Instruct_diverse_with_sycophancy:
+  all_token_mode:
+    swfc:
+      layer: 24
+      coefficient: 3.0
+    sttp:
+      layer: 24
+      coefficient: 24.0
+    stmp:
+      layer: 24
+      coefficient: 32.0
+    baseline_layer_projection_activation:
+      layer: 24
+  response_mode:
+    swfc:
+      layer: 25
+      coefficient: 5.0
+    sttp:
+      layer: 25
+      coefficient: 24.0
+    stmp:
+      layer: 25
+      coefficient: 32.0
+    baseline_layer_projection_activation:
+      layer: 25

@@ -20,6 +20,7 @@ dependencies = [
     "python-dotenv",
     "huggingface_hub",
     "datasets",
+    "networkx",
 ]
 
 [project.optional-dependencies]
