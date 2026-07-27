@@ -9,8 +9,11 @@
 #   MODEL RUN_NAME STEERING ARCHETYPES LIE_K
 # Required iff STEERING != none:
 #   LAYER COEFFICIENT STEERING_MODE EXTRACTION_METHOD HONESTY_CATEGORY FEATURES
-#   BASELINE_RUN_DIR (results/mask/<no_steering run> — steered metrics reuse its beliefs)
-# Optional: TP (default 4), TEST (set to any value for the 5-row subset)
+#   BASELINE_RUN_DIR (results/mask/<no_steering run> — steered metrics reuse its beliefs;
+#                     must have been generated with the SAME model and LORA_ADAPTER)
+# Optional: TP (default 4), TEST (set to any value for the 5-row subset),
+#   LORA_ADAPTER (LoRA served on top of MODEL; on tamia use a pre-downloaded
+#   LOCAL PATH — compute nodes have no internet)
 set -euo pipefail
 cd "$SLURM_SUBMIT_DIR"
 mkdir -p logs
@@ -40,6 +43,7 @@ honesty-evals mask generate \
     --archetypes "$ARCHETYPES" \
     --lie-k "$LIE_K" \
     ${TEST:+--test} \
+    ${LORA_ADAPTER:+--lora-adapter "$LORA_ADAPTER"} \
     "${STEER_FLAGS[@]}" \
     --launch-server --tp "$TP" --port 8192 \
     --max-new-tokens 1024 --temperature 1.0 --top-p 1.0 --seed 42
