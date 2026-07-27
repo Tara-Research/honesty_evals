@@ -22,6 +22,11 @@ import uvicorn
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
+# The only values vLLM's LoRAConfig accepts for max_lora_rank. Kept here so a
+# bad value is rejected by argparse / our own check with a readable message
+# rather than by pydantic literal validation inside engine construction.
+VLLM_MAX_LORA_RANKS = (1, 8, 16, 32, 64, 128, 256, 320, 512)
+
 
 class SamplingSpec(BaseModel):
     temperature: float
@@ -63,6 +68,7 @@ class GenerationServer:
         gpu_memory_utilization: float,
         loras: Dict[str, str],
         max_lora_rank: int,
+        enforce_eager: bool,
     ):
         # vLLM imports live here so the CLI can print --help without a GPU env.
         from transformers import AutoTokenizer
@@ -77,10 +83,28 @@ class GenerationServer:
             "model": model,
             "tensor_parallel_size": tensor_parallel_size,
             "gpu_memory_utilization": gpu_memory_utilization,
+            # Eager by default on purpose. In vLLM V1 this skips the whole
+            # torch.compile pipeline as well as CUDA graph capture: with it off,
+            # a cold start spent 227s compiling on TP0 alone and the other three
+            # ranks had not finished 4 minutes later (SLURM job 385305 hit its
+            # wall clock still warming up). Every eval before the steering
+            # removal also ran eager, so this is the configuration with a track
+            # record on tamia. Pass --no-enforce-eager to opt into CUDA graphs.
+            "enforce_eager": enforce_eager,
         }
         if max_model_len is not None:
             engine_args["max_model_len"] = max_model_len
         if loras:
+            # vLLM validates max_lora_rank against a fixed literal set; an
+            # off-list value fails deep inside LoRAConfig's pydantic validation
+            # with no mention of which knob is wrong (SLURM job 385294 died on
+            # the old default of 96). Check it here instead.
+            if max_lora_rank not in VLLM_MAX_LORA_RANKS:
+                raise ValueError(
+                    f"--max-lora-rank must be one of {list(VLLM_MAX_LORA_RANKS)}, "
+                    f"got {max_lora_rank}. Pick the smallest value >= the "
+                    "adapter's rank ('r' in its adapter_config.json)."
+                )
             engine_args["enable_lora"] = True
             engine_args["max_lora_rank"] = max_lora_rank
             engine_args["max_loras"] = max(4, len(loras))
@@ -191,7 +215,24 @@ def add_serve_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--max-model-len", type=int, default=None)
     parser.add_argument("--gpu-memory-utilization", type=float, default=0.9)
-    parser.add_argument("--max-lora-rank", type=int, default=96)
+    parser.add_argument(
+        "--no-enforce-eager",
+        dest="enforce_eager",
+        action="store_false",
+        default=True,
+        help="Enable torch.compile + CUDA graph capture. Off by default: a cold "
+        "start costs minutes of compilation per TP rank (job 385305 timed out "
+        "warming up), for throughput these batch evals have never needed.",
+    )
+    parser.add_argument(
+        "--max-lora-rank",
+        type=int,
+        default=128,
+        choices=VLLM_MAX_LORA_RANKS,
+        help="Max LoRA rank the engine reserves for. vLLM only accepts the "
+        "values above; it must be >= the adapter's own rank (see the adapter's "
+        "adapter_config.json 'r'). Default 128.",
+    )
 
 
 def run_serve(args: argparse.Namespace) -> None:
@@ -209,6 +250,7 @@ def run_serve(args: argparse.Namespace) -> None:
         gpu_memory_utilization=args.gpu_memory_utilization,
         loras=loras,
         max_lora_rank=args.max_lora_rank,
+        enforce_eager=args.enforce_eager,
     )
     app = build_app(server)
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")

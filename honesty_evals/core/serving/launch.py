@@ -26,6 +26,8 @@ def launched_server(
     loras: Optional[Dict[str, str]] = None,
     max_model_len: Optional[int] = None,
     gpu_memory_utilization: float = 0.9,
+    max_lora_rank: Optional[int] = None,
+    enforce_eager: bool = True,
     startup_timeout_s: float = DEFAULT_STARTUP_TIMEOUT_S,
 ):
     """Context manager yielding the server URL once /health responds."""
@@ -42,6 +44,10 @@ def launched_server(
         cmd += ["--max-model-len", str(max_model_len)]
     for name, path in (loras or {}).items():
         cmd += ["--lora", f"{name}={path}"]
+    if max_lora_rank is not None:
+        cmd += ["--max-lora-rank", str(max_lora_rank)]
+    if not enforce_eager:
+        cmd += ["--no-enforce-eager"]
 
     url = f"http://127.0.0.1:{port}"
     proc = subprocess.Popen(cmd)
