@@ -16,9 +16,6 @@ KNOWN_ARCHETYPES = [
 ]
 
 KNOWN_TECHNIQUES = [
-    "swfc",
-    "sttp",
-    "stmp",
     "aligned_baseline",
     "malicious_baseline",
     # Pseudo-technique: base/aligned model honesty scored against another

@@ -15,20 +15,14 @@ import matplotlib.pyplot as plt
 from honesty_evals.core.run_manifest import read_json
 from honesty_evals.evals.emergent_misalignment.metrics import METRICS_FILE
 
-CONDITION_ORDER = ["base", "em_baseline", "em_swfc", "em_sttp", "em_stmp"]
+CONDITION_ORDER = ["base", "em_baseline"]
 CONDITION_LABELS = {
     "base": "Base\n(aligned)",
-    "em_baseline": "EM\n(unsteered)",
-    "em_swfc": "EM + SwFC\n(steered)",
-    "em_sttp": "EM + StTP\n(steered)",
-    "em_stmp": "EM + StMP\n(steered)",
+    "em_baseline": "EM\n(LoRA)",
 }
 CONDITION_COLORS = {
     "base": "#9467bd",         # purple (aligned reference)
     "em_baseline": "#000000",  # black (misaligned baseline)
-    "em_swfc": "#ff7f0e",      # orange (SwFC)
-    "em_sttp": "#2ca02c",      # green (StTP)
-    "em_stmp": "#1f77b4",      # blue (StMP)
 }
 PANELS = [
     ("misaligned_rate", "Misaligned rate (%)"),

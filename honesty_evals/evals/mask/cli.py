@@ -8,7 +8,6 @@ from honesty_evals.cli_common import (
     add_judge_args,
     add_sampling_args,
     add_server_args,
-    add_steering_args,
 )
 from honesty_evals.evals.mask import download, generate, judge, metric, process_metrics
 
@@ -30,10 +29,9 @@ def register_cli(subparsers: argparse._SubParsersAction) -> None:
 
     p_gen = stages.add_parser(
         "generate",
-        help="Belief elicitation (unsteered) + K lying runs per row, per archetype",
+        help="Belief elicitation + K lying runs per row, per archetype",
     )
     generate.add_args(p_gen)
-    add_steering_args(p_gen)
     add_server_args(p_gen)
     add_sampling_args(p_gen)
     p_gen.set_defaults(func=generate.run_generate)

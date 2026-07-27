@@ -1,8 +1,8 @@
 """Run directories and manifests.
 
 Every eval run lives in results/<eval>/<run_name>/ with a config.json manifest
-recording full provenance (model, steering spec, resolved steering request,
-sampling params, git sha, timestamp). Judge/metrics stages take --run-dir and
+recording full provenance (model, sampling params, git sha, timestamp).
+Judge/metrics stages take --run-dir and
 read the manifest instead of reconstructing paths or re-passing flags.
 """
 from __future__ import annotations

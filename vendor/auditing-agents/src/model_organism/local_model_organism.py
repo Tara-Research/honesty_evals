@@ -1,13 +1,10 @@
-"""Local model organism backed by the honesty_evals steering server.
+"""Local model organism backed by the honesty_evals generation server.
 
 Historically this class loaded a base + LoRA via PEFT in-process and ran
 HuggingFace generation directly. In honesty_evals all generation goes through
-the steering server (``honesty-evals serve``), so this class is now a thin
-``SteeredClient`` wrapper: each ``__call__`` becomes one ``/generate`` request
-against the server, selecting the quirk LoRA by name. **No always-on
-steering** lives on this class — steering is exposed separately as an MCP
-tool the auditor can opt into (the tools attach a compiled steering payload
-to their own requests via ``self.client``).
+the generation server (``honesty-evals serve``), so this class is now a thin
+``GenerationClient`` wrapper: each ``__call__`` becomes one ``/generate``
+request against the server, selecting the quirk LoRA by name.
 
 Server contract:
 - The server must already be running and must have been launched with the
@@ -15,7 +12,7 @@ Server contract:
   as ``--lora <lora_adapter_repo>=<lora_repo_or_local_path>`` — i.e. the LoRA
   *name* on the server is the ``lora_adapter_repo`` string passed here.
 - The server URL comes from the ``server_url`` argument or the
-  ``STEERING_SERVER_URL`` environment variable (fail-loud if neither is set).
+  ``HONESTY_EVALS_SERVER_URL`` environment variable (fail-loud if neither is set).
 
 System prompt convention (mirrors ``DirectSystemPromptQuirk``):
 
@@ -33,7 +30,7 @@ import os
 import warnings
 from typing import Any, Dict, List, Optional
 
-from honesty_evals.core.serving.client import SteeredClient
+from honesty_evals.core.serving.client import GenerationClient
 
 from src import ChatMessage, MessageRole, Prompt
 
@@ -41,7 +38,7 @@ from .model_organism import ModelOrganism
 
 
 class LocalModelOrganism(ModelOrganism):
-    """A ``ModelOrganism`` that samples a base+LoRA through the steering server.
+    """A ``ModelOrganism`` that samples a base+LoRA through the generation server.
 
     The heavy model lives in the server process; this class holds only an
     HTTP client, so many organisms/processes can share one server.
@@ -64,7 +61,7 @@ class LocalModelOrganism(ModelOrganism):
         super().__init__(name=name)
         self.base_model_id = base_model_id
         self.lora_adapter_repo = lora_adapter_repo
-        # LoRA *name* as registered on the steering server (--lora NAME=PATH).
+        # LoRA *name* as registered on the generation server (--lora NAME=PATH).
         # Convention: the adapter repo string doubles as the server-side name.
         self.lora_name = lora_adapter_repo
         # Wrapped quirk text (with <PRIVILEGED_INSTRUCTIONS> framing). Kept on
@@ -81,21 +78,21 @@ class LocalModelOrganism(ModelOrganism):
         # and gracefully degrade when False.
         self.enable_sample_user = False
 
-        resolved_url = server_url or os.environ.get("STEERING_SERVER_URL")
+        resolved_url = server_url or os.environ.get("HONESTY_EVALS_SERVER_URL")
         if not resolved_url:
             raise RuntimeError(
-                "LocalModelOrganism needs a steering server: pass server_url= "
-                "or set the STEERING_SERVER_URL environment variable "
+                "LocalModelOrganism needs a generation server: pass server_url= "
+                "or set the HONESTY_EVALS_SERVER_URL environment variable "
                 "(e.g. http://localhost:8192). Launch one with "
                 "`honesty-evals serve --model <base_model_id> "
                 "--lora <lora_repo>=<lora_repo> ...`."
             )
         self.server_url = resolved_url
-        self.client = SteeredClient(resolved_url)
+        self.client = GenerationClient(resolved_url)
 
         # Fail fast on a misconfigured server (wrong/missing LoRA, server down).
         print(
-            f"[LocalModelOrganism] Connecting to steering server at "
+            f"[LocalModelOrganism] Connecting to generation server at "
             f"{resolved_url} (base={base_model_id}, lora={self.lora_name})"
         )
         info = self.client.health()
@@ -107,7 +104,7 @@ class LocalModelOrganism(ModelOrganism):
             )
         if self.lora_name is not None and self.lora_name not in info.get("loras", []):
             raise RuntimeError(
-                f"Steering server at {resolved_url} has no LoRA named "
+                f"Generation server at {resolved_url} has no LoRA named "
                 f"{self.lora_name!r}. Registered LoRAs: {info.get('loras')}. "
                 f"Launch the server with --lora {self.lora_name}=<repo_or_path>."
             )
@@ -202,7 +199,7 @@ class LocalModelOrganism(ModelOrganism):
             self._warn_once(
                 "intervention",
                 f"[{self.name}] LocalModelOrganism ignores intervention= kwarg "
-                "(vLLM-only path). Steering is exposed via dedicated MCP tools.",
+                "(vLLM-only path).",
             )
         if kwargs.pop("tools", None):
             raise NotImplementedError(

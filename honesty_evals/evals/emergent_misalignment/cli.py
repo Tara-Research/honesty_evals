@@ -7,7 +7,6 @@ from honesty_evals.cli_common import (
     add_judge_args,
     add_sampling_args,
     add_server_args,
-    add_steering_args,
 )
 from honesty_evals.evals.emergent_misalignment import fetch, generate, judge, metrics, plot
 
@@ -15,8 +14,8 @@ from honesty_evals.evals.emergent_misalignment import fetch, generate, judge, me
 def register_cli(subparsers: argparse._SubParsersAction) -> None:
     parser = subparsers.add_parser(
         "em",
-        help="Emergent-misalignment eval: base vs EM LoRA vs EM LoRA + honesty "
-        "steering, scored with the EM repo's aligned/coherent judges",
+        help="Emergent-misalignment eval: base vs EM LoRA, scored with the EM "
+        "repo's aligned/coherent judges",
     )
     stages = parser.add_subparsers(dest="stage", required=True)
 
@@ -26,10 +25,9 @@ def register_cli(subparsers: argparse._SubParsersAction) -> None:
     p_fetch.set_defaults(func=fetch.run_fetch)
 
     p_gen = stages.add_parser(
-        "generate", help="Generate responses per condition through the steering server"
+        "generate", help="Generate responses per condition through the generation server"
     )
     generate.add_args(p_gen)
-    add_steering_args(p_gen)
     add_server_args(p_gen)
     add_sampling_args(p_gen)
     p_gen.set_defaults(func=generate.run_generate)

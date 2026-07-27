@@ -1,4 +1,4 @@
-"""SteeredClient: HTTP client for the steering server.
+"""GenerationClient: HTTP client for the generation server.
 
 Evals call `generate_batch` with a list of chat-message lists; the client fans
 requests out with bounded concurrency and preserves order. The server does the
@@ -17,7 +17,7 @@ DEFAULT_CONCURRENCY = 64
 DEFAULT_TIMEOUT_S = 1800.0
 
 
-class SteeredClient:
+class GenerationClient:
     def __init__(
         self,
         server_url: str,
@@ -39,7 +39,6 @@ class SteeredClient:
         self,
         messages: List[Dict[str, str]],
         sampling: Dict,
-        steering: Optional[Dict] = None,
         lora: Optional[str] = None,
         enable_thinking: Optional[bool] = None,
     ) -> List[str]:
@@ -48,7 +47,6 @@ class SteeredClient:
             self.agenerate_batch(
                 [messages],
                 sampling=sampling,
-                steering=steering,
                 lora=lora,
                 enable_thinking=enable_thinking,
             )
@@ -58,7 +56,6 @@ class SteeredClient:
         self,
         messages_batch: List[List[Dict[str, str]]],
         sampling: Dict,
-        steering: Optional[Dict] = None,
         lora: Optional[str] = None,
         enable_thinking: Optional[bool] = None,
     ) -> List[List[str]]:
@@ -68,7 +65,6 @@ class SteeredClient:
             self.agenerate_batch(
                 messages_batch,
                 sampling=sampling,
-                steering=steering,
                 lora=lora,
                 enable_thinking=enable_thinking,
             )
@@ -80,7 +76,6 @@ class SteeredClient:
         self,
         messages: List[Dict[str, str]],
         sampling: Dict,
-        steering: Optional[Dict] = None,
         lora: Optional[str] = None,
         enable_thinking: Optional[bool] = None,
         client: Optional[httpx.AsyncClient] = None,
@@ -88,7 +83,6 @@ class SteeredClient:
         payload = {
             "messages": messages,
             "sampling": sampling,
-            "steering": steering,
             "lora": lora,
             "enable_thinking": enable_thinking,
         }
@@ -99,7 +93,7 @@ class SteeredClient:
             resp = await client.post(f"{self.server_url}/generate", json=payload)
             if resp.status_code != 200:
                 raise RuntimeError(
-                    f"steering server returned {resp.status_code}: {resp.text}"
+                    f"generation server returned {resp.status_code}: {resp.text}"
                 )
             data = resp.json()
             return [c["text"] for c in data["completions"]]
@@ -111,7 +105,6 @@ class SteeredClient:
         self,
         messages_batch: List[List[Dict[str, str]]],
         sampling: Dict,
-        steering: Optional[Dict] = None,
         lora: Optional[str] = None,
         enable_thinking: Optional[bool] = None,
     ) -> List[List[str]]:
@@ -123,7 +116,6 @@ class SteeredClient:
                     return await self.agenerate(
                         messages,
                         sampling=sampling,
-                        steering=steering,
                         lora=lora,
                         enable_thinking=enable_thinking,
                         client=client,

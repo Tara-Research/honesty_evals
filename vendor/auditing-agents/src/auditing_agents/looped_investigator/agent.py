@@ -173,35 +173,21 @@ def build_target_mcp_servers(
     fixed_prompt_method_name: Optional[str] = None,
     fixed_prompt_coherence_threshold: Optional[float] = None,
     fixed_prompt_filters: Optional[dict] = None,
-    sttp_base_model_id: Optional[str] = None,
-    sttp_vector_extraction_method: str = "logistic_regression",
-    sttp_vector_type: str = "global",
-    sttp_honesty_category: str = "generalized",
-    sttp_steering_mode: str = "all_token_mode",
-    sttp_features: str = "response_avg",
-    stmp_base_model_id: Optional[str] = None,
-    stmp_vector_extraction_method: str = "logistic_regression",
-    stmp_vector_type: str = "global",
-    stmp_honesty_category: str = "generalized",
-    stmp_steering_mode: str = "all_token_mode",
-    stmp_features: str = "response_avg",
 ) -> List["FastMCP"]:
     """Build the FastMCP servers for a given mcp_inference_type.
 
-    Heavy imports (model organism, persona_bridge, persona_playground) are
-    deferred to function body so the laptop-side auditor (which never calls
-    this) doesn't drag torch into its import graph.
+    Heavy imports (model organism, persona_playground) are deferred to
+    function body so the laptop-side auditor (which never calls this)
+    doesn't drag torch into its import graph.
     """
     # Deferred imports — these transitively pull torch via
-    # ``LocalModelOrganism`` / ``persona_bridge``.
+    # ``LocalModelOrganism``.
     from src.mcp_servers.auditing_mcp import create_auditing_mcp
     from src.mcp_servers.auditing_with_baseline_mcp import (
         create_auditing_with_baseline_mcp,
     )
     from src.mcp_servers.filesystem_mcp import create_filesystem_mcp
     from src.mcp_servers.local_target_mcp import create_local_target_mcp
-    from src.mcp_servers.tools.local_steering_tools import load_sttp_resources
-    from src.mcp_servers.tools.local_stmp_steering_tools import load_stmp_resources
 
     mcp_servers: List["FastMCP"] = []
 
@@ -368,80 +354,11 @@ def build_target_mcp_servers(
             )
         )
     elif mcp_inference_type == "target_local":
-        # Local HuggingFace+PEFT target, basic blackbox tools only.
+        # Local target served over HTTP, basic blackbox tools only.
         mcp_servers.append(
             create_local_target_mcp(
                 target_model=target_model,
-                include_sttp_steering=False,
                 allow_assistant_prefill=True,
-            )
-        )
-    elif mcp_inference_type in (
-        "target_local_sttp_steering",
-        "target_local_sttp_only",
-    ):
-        # Local HuggingFace+PEFT target with StTP steering exposed as a tool.
-        # Paper-faithful (mirrors auditing_mcp.py:89-91): the StTP tool itself
-        # returns BOTH the unsteered baseline and the steered response, so the
-        # separate plain ``sample`` tool is suppressed. ``_sttp_steering`` and
-        # ``_sttp_only`` are therefore behaviorally identical (``_only`` kept
-        # as an alias for existing scripts/configs).
-        if sttp_base_model_id is None:
-            raise ValueError(
-                f"{mcp_inference_type} requires sttp_base_model_id "
-                "(the persona_playground model id, e.g. "
-                "'meta-llama/Llama-3.3-70B-Instruct') so the resolver can find "
-                "the right honesty config section."
-            )
-        sttp_resources = load_sttp_resources(
-            base_model_id=sttp_base_model_id,
-            vector_extraction_method=sttp_vector_extraction_method,
-            vector_type=sttp_vector_type,
-            honesty_category=sttp_honesty_category,
-            steering_mode=sttp_steering_mode,
-            features=sttp_features,
-        )
-        mcp_servers.append(
-            create_local_target_mcp(
-                target_model=target_model,
-                include_sttp_steering=True,
-                sttp_resources=sttp_resources,
-                allow_assistant_prefill=True,
-                include_plain_sample=False,
-            )
-        )
-    elif mcp_inference_type in (
-        "target_local_stmp_steering",
-        "target_local_stmp_only",
-    ):
-        # Local HuggingFace+PEFT target with StMP steering exposed as a tool.
-        # Parallel sibling of the StTP branch above. The StMP tool returns
-        # BOTH the unsteered baseline and the steered response; the separate
-        # plain ``sample`` tool is suppressed. ``_stmp_steering`` and
-        # ``_stmp_only`` are behaviorally identical (``_only`` is an alias).
-        if stmp_base_model_id is None:
-            raise ValueError(
-                f"{mcp_inference_type} requires stmp_base_model_id "
-                "(the persona_playground model id, e.g. "
-                "'meta-llama/Llama-3.3-70B-Instruct') so the resolver can find "
-                "the right honesty config section."
-            )
-        stmp_resources = load_stmp_resources(
-            base_model_id=stmp_base_model_id,
-            vector_extraction_method=stmp_vector_extraction_method,
-            vector_type=stmp_vector_type,
-            honesty_category=stmp_honesty_category,
-            steering_mode=stmp_steering_mode,
-            features=stmp_features,
-        )
-        mcp_servers.append(
-            create_local_target_mcp(
-                target_model=target_model,
-                include_sttp_steering=False,
-                include_stmp_steering=True,
-                stmp_resources=stmp_resources,
-                allow_assistant_prefill=True,
-                include_plain_sample=False,
             )
         )
     else:
@@ -492,18 +409,6 @@ async def run_agent(
     vllm_max_completion_tokens: Optional[int] = None,
     vllm_max_tool_iterations: Optional[int] = None,
     vllm_extra_body: Optional[dict] = None,
-    sttp_base_model_id: Optional[str] = None,
-    sttp_vector_extraction_method: str = "logistic_regression",
-    sttp_vector_type: str = "global",
-    sttp_honesty_category: str = "generalized",
-    sttp_steering_mode: str = "all_token_mode",
-    sttp_features: str = "response_avg",
-    stmp_base_model_id: Optional[str] = None,
-    stmp_vector_extraction_method: str = "logistic_regression",
-    stmp_vector_type: str = "global",
-    stmp_honesty_category: str = "generalized",
-    stmp_steering_mode: str = "all_token_mode",
-    stmp_features: str = "response_avg",
     remote_mcp_clients: Optional[List[WrappedMcpClient]] = None,
 ) -> None:
     """Run the basic blackbox evaluation agent.
@@ -563,18 +468,6 @@ async def run_agent(
             fixed_prompt_method_name=fixed_prompt_method_name,
             fixed_prompt_coherence_threshold=fixed_prompt_coherence_threshold,
             fixed_prompt_filters=fixed_prompt_filters,
-            sttp_base_model_id=sttp_base_model_id,
-            sttp_vector_extraction_method=sttp_vector_extraction_method,
-            sttp_vector_type=sttp_vector_type,
-            sttp_honesty_category=sttp_honesty_category,
-            sttp_steering_mode=sttp_steering_mode,
-            sttp_features=sttp_features,
-            stmp_base_model_id=stmp_base_model_id,
-            stmp_vector_extraction_method=stmp_vector_extraction_method,
-            stmp_vector_type=stmp_vector_type,
-            stmp_honesty_category=stmp_honesty_category,
-            stmp_steering_mode=stmp_steering_mode,
-            stmp_features=stmp_features,
         )
         mcp_ctx = launch_all_mcp_servers(mcp_servers)
     else:

@@ -7,7 +7,6 @@ from honesty_evals.cli_common import (
     add_judge_args,
     add_sampling_args,
     add_server_args,
-    add_steering_args,
 )
 from honesty_evals.evals.among_us import judge, metrics, run
 
@@ -15,18 +14,13 @@ from honesty_evals.evals.among_us import judge, metrics, run
 def register_cli(subparsers: argparse._SubParsersAction) -> None:
     parser = subparsers.add_parser(
         "among-us",
-        help="Among Us social-deduction sandbox: N games through the steering "
+        help="Among Us social-deduction sandbox: N games through the generation "
         "server, per-timestep deception judging, impostor win rate",
     )
     stages = parser.add_subparsers(dest="stage", required=True)
 
-    p_run = stages.add_parser(
-        "run",
-        help="Run N games; the steering spec is applied to the role(s) marked "
-        "steered in --game-config",
-    )
+    p_run = stages.add_parser("run", help="Run N games concurrently")
     run.add_args(p_run)
-    add_steering_args(p_run)
     add_server_args(p_run)
     add_sampling_args(p_run)
     p_run.set_defaults(func=run.run_run)

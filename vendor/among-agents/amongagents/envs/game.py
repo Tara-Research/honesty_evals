@@ -7,7 +7,7 @@ import json
 import os
 
 from amongagents.agent.agent import HumanAgent, LLMAgent, LLMHumanAgent, RandomAgent
-from amongagents.agent.steered_agent import SteeredLLMAgent
+from amongagents.agent.server_agent import ServerLLMAgent
 from amongagents.agent.neutral_prompts import (
     MEETING_PHASE_INSTRUCTION,
     TASK_PHASE_INSTRUCTION,
@@ -176,7 +176,7 @@ class AmongUs:
 
             agent_dict = {
                 "LLM": lambda player: LLMAgent(player, tools, self.game_index, self.agent_config, self.list_of_impostors),
-                "SteeredLLM": lambda player: SteeredLLMAgent(player, tools, self.game_index, self.agent_config, self.list_of_impostors),
+                "ServerLLM": lambda player: ServerLLMAgent(player, tools, self.game_index, self.agent_config, self.list_of_impostors),
                 "Random": RandomAgent,
             }
             self.agents = []

@@ -1,11 +1,7 @@
-# Among Us eval configuration: game settings + which role receives the
-# compiled steering payload.
+# Among Us eval configuration: game settings.
 #
-# The steering method/layer/coefficient themselves come from the CLI steering
-# flags (`honesty-evals among-us run --steering ...`); this file only decides
-# the game shape and WHICH role that steering spec is applied to. Ported from
-# persona_playground src/AmongUs/configs/steering_config.yaml (role_steering)
-# + the SEVEN_MEMBER_GAME defaults of src/AmongUs/main.py.
+# Ported from persona_playground src/AmongUs/main.py's SEVEN_MEMBER_GAME
+# defaults.
 
 # Game-engine settings, passed straight to amongagents.envs.game.AmongUs.
 # Keys mirror amongagents/envs/configs/game_config.py (SEVEN_MEMBER_GAME).
@@ -19,11 +15,3 @@ game:
   max_num_buttons: 2
   kill_cooldown: 3
   max_timesteps: 50
-
-# Which role the compiled steering payload is attached to. Both roles always
-# generate through the same local steering server; a role with `false` sends
-# steering=None. With --steering none, no role is steered (a run with a
-# steered spec but no steered role is rejected).
-steered_roles:
-  impostor: true
-  crewmate: false

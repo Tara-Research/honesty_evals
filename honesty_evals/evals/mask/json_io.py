@@ -187,9 +187,6 @@ def build_metadata(
     model: Optional[str] = None,
     technique: Optional[str] = None,
     coefficient: Optional[float] = None,
-    layer: Optional[int] = None,
-    steering_mode: Optional[str] = None,
-    vector_type: Optional[str] = None,
     **extra: Any,
 ) -> Dict[str, Any]:
     """Construct a metadata dict, including only non-None values."""
@@ -200,12 +197,6 @@ def build_metadata(
         meta["technique"] = technique
     if coefficient is not None:
         meta["coefficient"] = coefficient
-    if layer is not None:
-        meta["layer"] = layer
-    if steering_mode is not None:
-        meta["steering_mode"] = steering_mode
-    if vector_type is not None:
-        meta["vector_type"] = vector_type
     meta["timestamp"] = datetime.now(timezone.utc).isoformat()
     meta.update({k: v for k, v in extra.items() if v is not None})
     return meta

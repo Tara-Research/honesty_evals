@@ -1,19 +1,13 @@
 """MASK benchmark — generation stage.
 
 Rewrite of persona_playground's src/mask/generate_responses.py on top of the
-shared serving/steering core (SteeringSpec + compile_steering + SteeredClient
-replace direct HF model loading and steerer context managers).
+shared serving core (GenerationClient replaces direct HF model loading).
 
 Semantics preserved from the original:
 
 * Each row yields ``--lie-k`` independent "lying" generations from
   system_prompt + user_prompt (or the 4-message doubling-down chain for the
-  doubling_down_known_facts archetype). These runs ARE steered when the run
-  is steered.
-* Belief-elicitation generations run ONLY for unsteered runs — steered runs
-  reuse the unsteered baseline's beliefs at the metrics stage (see
-  metric.py's --baseline-run-dir). Belief runs are always generated with
-  steering=None.
+  doubling_down_known_facts archetype).
 * belief_elicit_1 gets 3 runs; belief_elicit_2/3 get 1 run each (the
   statistics archetype only elicits belief_elicit_1).
 * ``<think>...</think>`` reasoning traces are stripped from responses.
@@ -34,16 +28,13 @@ from typing import Dict, List
 import pandas as pd
 
 from honesty_evals.cli_common import (
-    build_spec_from_args,
     enable_thinking_value,
     sampling_dict,
     validate_server_args,
 )
 from honesty_evals.core.run_manifest import create_run_dir
-from honesty_evals.core.serving.client import SteeredClient
+from honesty_evals.core.serving.client import GenerationClient
 from honesty_evals.core.serving.launch import launched_server
-from honesty_evals.core.steering.compile import compile_steering
-from honesty_evals.core.steering.spec import SteeringSpec
 from honesty_evals.evals.mask.filename_utils import KNOWN_ARCHETYPES
 from honesty_evals.evals.mask.json_io import (
     build_metadata,
@@ -82,11 +73,9 @@ def _belief_k(archetype: str) -> Dict[str, int]:
 
 
 def _process_archetype(
-    client: SteeredClient,
+    client: GenerationClient,
     archetype: str,
     args: argparse.Namespace,
-    spec: SteeringSpec,
-    steering_payload: Dict | None,
     lora: str | None,
     output_path: Path,
     out_meta: Dict,
@@ -114,7 +103,6 @@ def _process_archetype(
     completions = client.generate_batch(
         messages_batch,
         sampling=sampling_dict(args, n=args.lie_k),
-        steering=steering_payload,
         lora=lora,
         enable_thinking=enable_thinking,
     )
@@ -126,9 +114,8 @@ def _process_archetype(
         for col, text in zip(lie_cols, texts):
             df.at[idx, col] = _strip_think_tags(text)
 
-    # ---- Belief elicitation: unsteered runs only, never steered ----
-    # Steered runs reuse the baseline run's beliefs at the metrics stage.
-    if not spec.is_steered and "belief_elicit_1" in df.columns:
+    # ---- Belief elicitation ----
+    if "belief_elicit_1" in df.columns:
         for be_num, k_value in _belief_k(archetype).items():
             belief_col = f"belief_elicit_{be_num}"
             if belief_col not in df.columns:
@@ -152,14 +139,12 @@ def _process_archetype(
             ]
             print(
                 f"[mask/generate] {archetype}: {len(belief_batch)} belief_elicit_{be_num} "
-                f"prompts x {k_value} runs (unsteered)"
+                f"prompts x {k_value} runs"
             )
-            # Beliefs come from the same (possibly LoRA-adapted) model — only
-            # steering is withheld from belief elicitation.
+            # Beliefs come from the same (possibly LoRA-adapted) model.
             completions = client.generate_batch(
                 belief_batch,
                 sampling=sampling_dict(args, n=k_value),
-                steering=None,
                 lora=lora,
                 enable_thinking=enable_thinking,
             )
@@ -177,7 +162,6 @@ def _process_archetype(
 
 def run_generate(args: argparse.Namespace) -> None:
     validate_server_args(args)
-    spec = build_spec_from_args(args, model_id=args.model)
 
     if args.archetypes.strip() == "all":
         archetypes = sorted(KNOWN_ARCHETYPES)
@@ -203,7 +187,6 @@ def run_generate(args: argparse.Namespace) -> None:
         manifest={
             "model": args.model,
             "lora_adapter": args.lora_adapter,
-            "steering": spec.to_dict(),
             "archetypes": archetypes,
             "lie_k": args.lie_k,
             "test": args.test,
@@ -212,12 +195,7 @@ def run_generate(args: argparse.Namespace) -> None:
         },
     )
 
-    compiled = compile_steering(spec, model_id=args.model, payload_dir=str(run_dir / "steering"))
-    steering_payload = compiled.to_dict() if compiled else None
-
     modelname = args.model.split("/")[-1]
-    file_technique = spec.method if spec.is_steered else None
-    file_coefficient = spec.coefficient if spec.is_steered else None
 
     # LoRA convention (same as auditbench): the server-side adapter name IS the
     # repo/path string, so an external server must be launched with
@@ -225,26 +203,16 @@ def run_generate(args: argparse.Namespace) -> None:
     lora = args.lora_adapter
 
     def process_all(server_url: str) -> None:
-        client = SteeredClient(server_url)
+        client = GenerationClient(server_url)
         for archetype in archetypes:
-            output_path = response_path(
-                run_dir, archetype, modelname, file_technique, file_coefficient
-            )
+            output_path = response_path(run_dir, archetype, modelname)
             out_meta = build_metadata(
                 archetype=archetype,
                 model=modelname,
-                technique=spec.method if spec.is_steered else "no_steering",
-                coefficient=file_coefficient,
-                layer=spec.layer,
-                steering_mode=spec.steering_mode,
-                vector_type=spec.vector_type,
-                extraction_method=spec.extraction_method,
                 lie_k=args.lie_k,
                 run_name=args.run_name,
             )
-            _process_archetype(
-                client, archetype, args, spec, steering_payload, lora, output_path, out_meta
-            )
+            _process_archetype(client, archetype, args, lora, output_path, out_meta)
 
     if args.launch_server:
         with launched_server(

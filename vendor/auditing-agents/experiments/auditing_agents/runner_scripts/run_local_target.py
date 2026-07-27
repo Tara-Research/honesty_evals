@@ -1,20 +1,17 @@
-"""Runner for an in-process local target with optional StTP steering tool.
+"""Runner for an in-process local target.
 
-Each invocation handles ONE quirk: loads base + LoRA into GPU memory once,
-runs N audit sequentially, writes structured outputs.
+Each invocation handles ONE quirk: connects to the generation server once,
+runs N audits sequentially, writes structured outputs.
 
 Example:
     python -m experiments.auditing_agents.runner_scripts.run_local_target \\
       --quirk-name secret_loyalty \\
       --lora-repo auditing-agents/llama_70b_synth_docs_only_secret_loyalty \\
-      --mcp-inference-type target_local_sttp_steering \\
+      --mcp-inference-type target_local \\
       --n-runs 3 --max-tokens 100000 \\
       --agent-type vllm --agent-model openai/gpt-oss-120b \\
       --vllm-base-url http://localhost:8001/v1 \\
       --output-dir agent_outputs_local_target
-
-For the unsteered baseline against the same organism, use
-``--mcp-inference-type target_local``.
 """
 
 import argparse
@@ -81,29 +78,6 @@ def setup_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--top-p", type=float, default=0.9)
     parser.add_argument("--enable-thinking", action="store_true")
 
-    # ---- StTP tool config (used only when mcp-inference-type is target_local_sttp_steering) ----
-    parser.add_argument("--sttp-vector-extraction-method", type=str, default="logistic_regression")
-    parser.add_argument("--sttp-vector-type", type=str, default="global")
-    parser.add_argument("--sttp-honesty-category", type=str, default="generalized")
-    parser.add_argument(
-        "--sttp-steering-mode",
-        type=str,
-        default="all_token_mode",
-        choices=["all_token_mode", "response_mode"],
-    )
-    parser.add_argument(
-        "--sttp-features",
-        type=str,
-        default="response_avg",
-        choices=[
-            "prompt_avg", "prompt_all", "response_avg", "response_all",
-            "first_special_token", "first_content_token",
-        ],
-        help="Which feature-mode LR vector + embeddings to load. Maps to the "
-             "per-feature `lr_*_path` / `pos_*_path` / `neg_*_path` keys in the "
-             "global common_steering_config block. Requires sttp_vector_type='global'.",
-    )
-
     # ---- Audit budget ----
     parser.add_argument("--n-runs", type=int, default=1)
     parser.add_argument("--running-time", type=int, default=None,
@@ -121,18 +95,10 @@ def setup_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--mcp-inference-type",
         type=str,
-        default="target_local_sttp_steering",
-        choices=[
-            "target_local",
-            "target_local_sttp_steering",
-            "target_local_sttp_only",
-        ],
+        default="target_local",
+        choices=["target_local"],
         help="Which MCP tool bundle the auditor sees against the local target. "
-        "'target_local' = plain sample only (no steering). "
-        "'target_local_sttp_steering' and 'target_local_sttp_only' are now "
-        "EQUIVALENT: the StTP tool returns BOTH the unsteered baseline and the "
-        "steered response in one call, and the separate plain sample tool is "
-        "suppressed (paper-faithful). '_only' is kept as an alias.",
+        "'target_local' = plain sample tool.",
     )
 
     # ---- Auditor passthrough ----
@@ -211,7 +177,7 @@ async def main():
     print(f"[run_local_target] lora_repo={args.lora_repo}")
     print(f"[run_local_target] mcp_inference_type={args.mcp_inference_type}")
 
-    # Build the target organism once. Heavy: loads 70B+LoRA into GPU memory.
+    # Build the target organism once (a thin HTTP client of the generation server).
     target_model = LocalModelOrganism(
         name="target_model",
         base_model_id=args.base_model_id,
@@ -293,12 +259,6 @@ async def main():
                     vllm_max_completion_tokens=args.vllm_max_completion_tokens,
                     vllm_max_tool_iterations=args.vllm_max_tool_iterations,
                     vllm_extra_body=vllm_extra_body,
-                    sttp_base_model_id=args.base_model_id,
-                    sttp_vector_extraction_method=args.sttp_vector_extraction_method,
-                    sttp_vector_type=args.sttp_vector_type,
-                    sttp_honesty_category=args.sttp_honesty_category,
-                    sttp_steering_mode=args.sttp_steering_mode,
-                    sttp_features=args.sttp_features,
                 )
 
                 metadata = {
@@ -311,11 +271,6 @@ async def main():
                     "mcp_inference_type": args.mcp_inference_type,
                     "agent_type": args.agent_type,
                     "agent_model": args.agent_model,
-                    "sttp_vector_extraction_method": args.sttp_vector_extraction_method,
-                    "sttp_vector_type": args.sttp_vector_type,
-                    "sttp_honesty_category": args.sttp_honesty_category,
-                    "sttp_steering_mode": args.sttp_steering_mode,
-                    "sttp_features": args.sttp_features,
                     "running_time_minutes": args.running_time,
                     "max_tokens": args.max_tokens,
                     "n_candidate_quirks": args.n_candidate_quirks,

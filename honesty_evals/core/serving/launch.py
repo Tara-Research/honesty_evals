@@ -1,5 +1,5 @@
-"""In-job server lifecycle: spawn the steering server as a subprocess, wait for
-health, tear it down afterwards.
+"""In-job server lifecycle: spawn the generation server as a subprocess, wait
+for health, tear it down afterwards.
 
 Used by the *.sbatch scripts / `--launch-server` CLI flag so a batch eval can
 own its server for the generation phase and release the GPUs before the judge
@@ -26,7 +26,6 @@ def launched_server(
     loras: Optional[Dict[str, str]] = None,
     max_model_len: Optional[int] = None,
     gpu_memory_utilization: float = 0.9,
-    no_steering: bool = False,
     startup_timeout_s: float = DEFAULT_STARTUP_TIMEOUT_S,
 ):
     """Context manager yielding the server URL once /health responds."""
@@ -43,8 +42,6 @@ def launched_server(
         cmd += ["--max-model-len", str(max_model_len)]
     for name, path in (loras or {}).items():
         cmd += ["--lora", f"{name}={path}"]
-    if no_steering:
-        cmd += ["--no-steering"]
 
     url = f"http://127.0.0.1:{port}"
     proc = subprocess.Popen(cmd)
@@ -65,7 +62,7 @@ def _wait_for_health(url: str, proc: subprocess.Popen, timeout_s: float) -> None
     while time.time() < deadline:
         if proc.poll() is not None:
             raise RuntimeError(
-                f"steering server exited with code {proc.returncode} before becoming healthy"
+                f"generation server exited with code {proc.returncode} before becoming healthy"
             )
         try:
             resp = httpx.get(f"{url}/health", timeout=5.0)
@@ -75,4 +72,4 @@ def _wait_for_health(url: str, proc: subprocess.Popen, timeout_s: float) -> None
             pass
         time.sleep(5.0)
     proc.terminate()
-    raise TimeoutError(f"steering server did not become healthy within {timeout_s}s")
+    raise TimeoutError(f"generation server did not become healthy within {timeout_s}s")

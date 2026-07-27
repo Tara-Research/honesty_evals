@@ -1,12 +1,9 @@
-"""Steering-enabled vLLM generation server.
+"""vLLM generation server.
 
-One AsyncLLMEngine (from the external/vllm-steer fork) behind a small FastAPI
-app. All five evals generate through this server — steered generation attaches
-a compiled steering request (see core/steering/compile.py) per request.
-
-Derived from persona_playground's auditing-agents hybrid server
-(src/internals/server/vllm_workers.py), slimmed to what the evals need:
-chat-template rendering, LoRA selection, SteerVectorRequest plumbing.
+One AsyncLLMEngine (stock vLLM) behind a small FastAPI app. All five evals
+generate through this server: chat-template rendering happens server-side
+(the server owns the tokenizer), and LoRA adapters registered via --lora can
+be selected per request.
 
 Run:
     honesty-evals serve --model <hf_id> --tp <n> --port <p> [--lora name=path ...]
@@ -18,7 +15,6 @@ Endpoints:
 from __future__ import annotations
 
 import argparse
-import time
 import uuid
 from typing import Dict, List, Optional
 
@@ -42,8 +38,6 @@ class GenerateRequest(BaseModel):
     messages: Optional[List[Dict[str, str]]] = None
     prompt: Optional[str] = None
     sampling: SamplingSpec
-    # CompiledSteering.to_dict() from core/steering/compile.py, or null for unsteered.
-    steering: Optional[Dict] = None
     # LoRA adapter name (must have been registered via --lora), or null for base model.
     lora: Optional[str] = None
     # Chat-template kwarg for models that support it (e.g. Qwen). None = model default.
@@ -60,7 +54,7 @@ class GenerateResponse(BaseModel):
     num_prompt_tokens: int
 
 
-class SteeringServer:
+class GenerationServer:
     def __init__(
         self,
         model: str,
@@ -68,7 +62,6 @@ class SteeringServer:
         max_model_len: Optional[int],
         gpu_memory_utilization: float,
         loras: Dict[str, str],
-        enable_steering: bool,
         max_lora_rank: int,
     ):
         # vLLM imports live here so the CLI can print --help without a GPU env.
@@ -78,7 +71,6 @@ class SteeringServer:
         from vllm.lora.request import LoRARequest
 
         self.model = model
-        self.enable_steering = enable_steering
         self.tokenizer = AutoTokenizer.from_pretrained(model)
 
         engine_args = {
@@ -92,17 +84,6 @@ class SteeringServer:
             engine_args["enable_lora"] = True
             engine_args["max_lora_rank"] = max_lora_rank
             engine_args["max_loras"] = max(4, len(loras))
-        if enable_steering:
-            # Required engine flags for the vllm-steer fork (same as
-            # auditing-agents' interp mode).
-            engine_args["enable_steer_vector"] = True
-            engine_args["enforce_eager"] = True
-            engine_args["enable_chunked_prefill"] = False
-            engine_args["enable_prefix_caching"] = True
-            engine_args["max_steer_vectors"] = 1
-        else:
-            engine_args["enable_chunked_prefill"] = True
-            engine_args["enable_prefix_caching"] = True
 
         self.engine = AsyncLLMEngine.from_engine_args(AsyncEngineArgs(**engine_args))
 
@@ -110,35 +91,6 @@ class SteeringServer:
             name: LoRARequest(lora_name=name, lora_int_id=i + 1, lora_path=path)
             for i, (name, path) in enumerate(loras.items())
         }
-
-        # Stable int ids per steering-payload name (the fork identifies steer
-        # vectors by name; ids just have to be positive and consistent).
-        self._steer_ids: Dict[str, int] = {}
-
-    def _steer_request(self, steering: Optional[Dict]):
-        if steering is None:
-            return None
-        if not self.enable_steering:
-            raise HTTPException(
-                status_code=400,
-                detail="This server was started without steering support "
-                "(--no-steering); steered requests are not accepted.",
-            )
-        from vllm.steer_vectors.request import SteerVectorRequest
-
-        name = steering["name"]
-        if name not in self._steer_ids:
-            self._steer_ids[name] = len(self._steer_ids) + 1
-        return SteerVectorRequest(
-            steer_vector_name=name,
-            steer_vector_int_id=self._steer_ids[name],
-            steer_vector_local_path=steering["payload_path"],
-            scale=steering["scale"],
-            target_layers=steering["target_layers"],
-            prefill_trigger_tokens=steering["prefill_trigger_tokens"],
-            generate_trigger_tokens=steering["generate_trigger_tokens"],
-            algorithm=steering["algorithm"],
-        )
 
     def _render_prompt(self, req: GenerateRequest) -> List[int]:
         if (req.messages is None) == (req.prompt is None):
@@ -160,8 +112,8 @@ class SteeringServer:
         return self.tokenizer.encode(text, add_special_tokens=False)
 
     async def generate(self, req: GenerateRequest) -> GenerateResponse:
+        from vllm.inputs import TokensPrompt
         from vllm.sampling_params import SamplingParams
-        from vllm.v1.engine import EngineCoreRequest
 
         prompt_token_ids = self._render_prompt(req)
 
@@ -184,26 +136,12 @@ class SteeringServer:
                 )
             lora_request = self.lora_requests[req.lora]
 
-        request_id = str(uuid.uuid4())
-        core_request = EngineCoreRequest(
-            request_id=request_id,
-            prompt_token_ids=prompt_token_ids,
-            mm_features=None,
-            sampling_params=sampling_params,
-            pooling_params=None,
-            eos_token_id=self.tokenizer.eos_token_id,
-            arrival_time=time.time(),
-            lora_request=lora_request,
-            steer_vector_request=self._steer_request(req.steering),
-            cache_salt=None,
-            data_parallel_rank=None,
-        )
-
         finished = {}
         async for request_output in self.engine.generate(
-            prompt=core_request,
+            prompt=TokensPrompt(prompt_token_ids=prompt_token_ids),
             sampling_params=sampling_params,
-            request_id=request_id,
+            request_id=str(uuid.uuid4()),
+            lora_request=lora_request,
         ):
             for output in request_output.outputs:
                 if output.finish_reason is not None:
@@ -221,15 +159,14 @@ class SteeringServer:
         )
 
 
-def build_app(server: SteeringServer) -> FastAPI:
-    app = FastAPI(title="honesty-evals steering server")
+def build_app(server: GenerationServer) -> FastAPI:
+    app = FastAPI(title="honesty-evals generation server")
 
     @app.get("/health")
     async def health():
         return {
             "status": "ok",
             "model": server.model,
-            "steering": server.enable_steering,
             "loras": sorted(server.lora_requests),
         }
 
@@ -255,12 +192,6 @@ def add_serve_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--max-model-len", type=int, default=None)
     parser.add_argument("--gpu-memory-utilization", type=float, default=0.9)
     parser.add_argument("--max-lora-rank", type=int, default=96)
-    parser.add_argument(
-        "--no-steering",
-        action="store_true",
-        help="Run as a plain vLLM server (rejects steered requests; enables "
-        "chunked prefill / CUDA graphs for speed)",
-    )
 
 
 def run_serve(args: argparse.Namespace) -> None:
@@ -271,13 +202,12 @@ def run_serve(args: argparse.Namespace) -> None:
         name, path = spec.split("=", 1)
         loras[name] = path
 
-    server = SteeringServer(
+    server = GenerationServer(
         model=args.model,
         tensor_parallel_size=args.tp,
         max_model_len=args.max_model_len,
         gpu_memory_utilization=args.gpu_memory_utilization,
         loras=loras,
-        enable_steering=not args.no_steering,
         max_lora_rank=args.max_lora_rank,
     )
     app = build_app(server)

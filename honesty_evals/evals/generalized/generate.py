@@ -2,12 +2,12 @@
 
 Loads the 112-scenario v4 test set (8 categories x 14), builds one
 conversation per scenario (system prompt honest/dishonest variant + user
-message), generates through the steering server, and writes
+message), generates through the generation server, and writes
 responses.json into the run dir.
 
 Rewrite of persona_playground's
 src/experiments/sequential_steering/test/sequential_steering_one_layer_honesty.py
-on top of the shared serving/steering core.
+on top of the shared serving core.
 """
 from __future__ import annotations
 
@@ -17,17 +17,14 @@ from pathlib import Path
 from typing import Dict, List
 
 from honesty_evals.cli_common import (
-    build_spec_from_args,
     enable_thinking_value,
     sampling_dict,
     validate_server_args,
 )
 from honesty_evals.core.paths import DATA_FOLDER
 from honesty_evals.core.run_manifest import create_run_dir, write_json
-from honesty_evals.core.serving.client import SteeredClient
+from honesty_evals.core.serving.client import GenerationClient
 from honesty_evals.core.serving.launch import launched_server
-from honesty_evals.core.steering.compile import compile_steering
-from honesty_evals.core.steering.spec import SteeringSpec
 
 DEFAULT_SCENARIOS = DATA_FOLDER / "generalized" / "v4" / "generalized_honesty_test_scenarios.json"
 
@@ -63,7 +60,6 @@ def build_messages(scenario: Dict, system_prompt_variant: str) -> List[Dict[str,
 
 def run_generate(args: argparse.Namespace) -> None:
     validate_server_args(args)
-    spec = build_spec_from_args(args, model_id=args.model)
 
     scenarios_path = Path(args.scenarios)
     categories = (
@@ -78,7 +74,6 @@ def run_generate(args: argparse.Namespace) -> None:
         run_name=args.run_name,
         manifest={
             "model": args.model,
-            "steering": spec.to_dict(),
             "system_prompt_variant": args.system_prompt_variant,
             "scenarios_path": str(scenarios_path),
             "categories": categories,
@@ -88,17 +83,13 @@ def run_generate(args: argparse.Namespace) -> None:
         },
     )
 
-    compiled = compile_steering(spec, model_id=args.model, payload_dir=str(run_dir / "steering"))
-    steering_payload = compiled.to_dict() if compiled else None
-
     messages_batch = [build_messages(s, args.system_prompt_variant) for s in scenarios]
 
     def generate(server_url: str) -> List[List[str]]:
-        client = SteeredClient(server_url)
+        client = GenerationClient(server_url)
         return client.generate_batch(
             messages_batch,
             sampling=sampling_dict(args),
-            steering=steering_payload,
             enable_thinking=enable_thinking_value(args),
         )
 

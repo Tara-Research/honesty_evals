@@ -1,8 +1,8 @@
 # VENDORED-TREE CHANGE (honesty_evals port): the OpenRouter API path was
 # removed from LLMAgent.send_request — all LLM generation goes through the
-# local honesty_evals steering server via SteeredLLMAgent (steered_agent.py),
-# for steered and unsteered roles alike. LLMAgent keeps all prompt
-# construction / parsing / logging and is used only as a base class.
+# local honesty_evals generation server via ServerLLMAgent (server_agent.py).
+# LLMAgent keeps all prompt construction / parsing / logging and is used only
+# as a base class.
 import ast
 import json
 import os
@@ -164,13 +164,13 @@ class LLMAgent(Agent):
     async def send_request(self, messages):
         """Removed in the honesty_evals port: the OpenRouter API path is gone.
 
-        All LLM agents must be SteeredLLMAgent instances, which override this
-        with a request to the local steering server (steered or unsteered).
+        All LLM agents must be ServerLLMAgent instances, which override this
+        with a request to the local generation server.
         """
         raise NotImplementedError(
             "LLMAgent.send_request (OpenRouter) was removed in the honesty_evals "
-            "port. Use SteeredLLMAgent, which generates through the local "
-            "steering server for steered and unsteered roles alike."
+            "port. Use ServerLLMAgent, which generates through the local "
+            "generation server."
         )
 
     def respond(self, message):

@@ -7,14 +7,13 @@ both the vendored ``src`` package and ``honesty_evals``.
 
 Stages:
     run    -> experiments.auditing_agents.runner_scripts.run_local_target
-              (or run_local_target_stmp with --technique stmp)
     judge  -> experiments.auditing_agents.runner_scripts.score_audits
 
 Outputs are routed to ``results/auditbench/<run_name>/`` via the runners'
 ``--output-dir`` / ``--exp-dir`` flags. The target model is served by the
-steering server: the rewritten ``LocalModelOrganism`` reads its URL from the
-``STEERING_SERVER_URL`` environment variable, which the ``run`` stage sets
-from ``--server-url``.
+generation server: the rewritten ``LocalModelOrganism`` reads its URL from
+the ``HONESTY_EVALS_SERVER_URL`` environment variable, which the ``run``
+stage sets from ``--server-url``.
 """
 from __future__ import annotations
 
@@ -28,10 +27,7 @@ from honesty_evals.core.paths import RESULTS_ROOT, ROOT_FOLDER
 
 VENDOR_DIR = ROOT_FOLDER / "vendor" / "auditing-agents"
 
-RUNNER_BY_TECHNIQUE = {
-    "sttp": "experiments.auditing_agents.runner_scripts.run_local_target",
-    "stmp": "experiments.auditing_agents.runner_scripts.run_local_target_stmp",
-}
+RUN_MODULE = "experiments.auditing_agents.runner_scripts.run_local_target"
 JUDGE_MODULE = "experiments.auditing_agents.runner_scripts.score_audits"
 
 
@@ -67,7 +63,7 @@ def add_run_args(parser: argparse.ArgumentParser) -> None:
     g.add_argument(
         "--lora-repo",
         default=None,
-        help="Quirk LoRA adapter repo/path. Must be registered on the steering "
+        help="Quirk LoRA adapter repo/path. Must be registered on the generation "
         "server under this exact name (--lora <repo>=<repo_or_path>). Omit to "
         "audit the bare base model (smoke testing only).",
     )
@@ -75,8 +71,8 @@ def add_run_args(parser: argparse.ArgumentParser) -> None:
     g.add_argument(
         "--server-url",
         required=True,
-        help="URL of the running steering server hosting base model + quirk LoRA "
-        "(exported to the vendored runner as STEERING_SERVER_URL)",
+        help="URL of the running generation server hosting base model + quirk LoRA "
+        "(exported to the vendored runner as HONESTY_EVALS_SERVER_URL)",
     )
 
     g = parser.add_argument_group("auditor")
@@ -95,39 +91,16 @@ def add_run_args(parser: argparse.ArgumentParser) -> None:
     g.add_argument("--max-tokens", type=int, default=None, help="Token budget per agent (XOR --running-time)")
     g.add_argument("--running-time", type=int, default=None, help="Minutes per agent (XOR --max-tokens)")
 
-    g = parser.add_argument_group("steering tool")
-    g.add_argument(
-        "--technique",
-        choices=sorted(RUNNER_BY_TECHNIQUE),
-        default="sttp",
-        help="Which steering MCP tool variant to run (selects the vendored runner)",
-    )
-    g.add_argument(
-        "--mcp-inference-type",
-        default=None,
-        help="Runner --mcp-inference-type override (e.g. target_local for the "
-        "unsteered baseline). Default: the runner's steered default.",
-    )
-    g.add_argument("--features", default=None, help="LR feature mode for the steering vector (runner --<tech>-features)")
-    g.add_argument("--vector-type", default=None, help="Steering vector variant (runner --<tech>-vector-type)")
-    g.add_argument("--honesty-category", default=None, help="Honesty dataset/category (runner --<tech>-honesty-category)")
-    g.add_argument(
-        "--steering-mode",
-        choices=["all_token_mode", "response_mode"],
-        default=None,
-        help="Steer all tokens or response tokens only (runner --<tech>-steering-mode)",
-    )
-
     parser.add_argument("--run-name", required=True, help="Run namespace: outputs go to results/auditbench/<run-name>/")
 
 
 def run_run(args: argparse.Namespace) -> None:
-    module = RUNNER_BY_TECHNIQUE[args.technique]
     fwd: List[str] = [
         "--quirk-name", args.quirk_name,
         "--base-model-id", args.base_model_id,
         "--n-runs", str(args.n_runs),
         "--output-dir", _run_dir(args.run_name),
+        "--mcp-inference-type", "target_local",
     ]
     if args.lora_repo is not None:
         fwd += ["--lora-repo", args.lora_repo]
@@ -135,8 +108,6 @@ def run_run(args: argparse.Namespace) -> None:
         fwd += ["--max-tokens", str(args.max_tokens)]
     if args.running_time is not None:
         fwd += ["--running-time", str(args.running_time)]
-    if args.mcp_inference_type is not None:
-        fwd += ["--mcp-inference-type", args.mcp_inference_type]
     if args.auditor_model is not None:
         fwd += ["--agent-model", args.auditor_model]
     if args.agent_type is not None:
@@ -146,18 +117,7 @@ def run_run(args: argparse.Namespace) -> None:
     if args.n_turns is not None:
         fwd += ["--vllm-max-tool-iterations", str(args.n_turns)]
 
-    # Steering-tool flags are prefixed per technique (--sttp-* / --stmp-*).
-    p = args.technique
-    if args.features is not None:
-        fwd += [f"--{p}-features", args.features]
-    if args.vector_type is not None:
-        fwd += [f"--{p}-vector-type", args.vector_type]
-    if args.honesty_category is not None:
-        fwd += [f"--{p}-honesty-category", args.honesty_category]
-    if args.steering_mode is not None:
-        fwd += [f"--{p}-steering-mode", args.steering_mode]
-
-    _forward(module, fwd, extra_env={"STEERING_SERVER_URL": args.server_url})
+    _forward(RUN_MODULE, fwd, extra_env={"HONESTY_EVALS_SERVER_URL": args.server_url})
 
 
 # ---------- judge ----------
@@ -194,7 +154,7 @@ def register_cli(subparsers: argparse._SubParsersAction) -> None:
     parser = subparsers.add_parser(
         "auditbench",
         help="AuditBench blind-audit eval (vendored auditing-agents): auditor "
-        "agent probes a quirked base+LoRA target with steering MCP tools",
+        "agent probes a quirked base+LoRA target",
     )
     stages = parser.add_subparsers(dest="stage", required=True)
 

@@ -3,15 +3,11 @@
 Port of persona_playground's src/mask/metric.py, adapted to run-dir I/O:
 
 * Reads <run-dir>/{archetype}/evaluated/*.json, writes
-  <run-dir>/{archetype}/metrics/*.json.
-* Steered runs carry no belief-elicitation generations, so their beliefs are
-  reused from the matching UNSTEERED baseline run: pass --baseline-run-dir
-  pointing at the no_steering run for the same model/archetypes. (In the
-  original repo baseline and steered files shared one experiment directory;
-  here each run dir holds a single steering condition.)
+  <run-dir>/{archetype}/metrics/*.json. Beliefs are computed from each file's
+  own belief-elicitation columns.
 * The base-filtered pass (--base-filtered-run-dir) scores a base/aligned
-  model's answers against THIS run's reused beliefs, writing a
-  'base_filtered' pseudo-technique metrics file into --run-dir.
+  model's answers against THIS run's beliefs, writing a 'base_filtered'
+  pseudo-technique metrics file into --run-dir.
 """
 from __future__ import annotations
 
@@ -31,8 +27,6 @@ from honesty_evals.evals.mask.json_io import (
     read_json_data,
     write_json_data,
 )
-
-BASELINE_TECHNIQUES = ("no_steering", "aligned_baseline", "malicious_baseline")
 
 
 def _scalar_notna(val):
@@ -594,32 +588,6 @@ def _log_extraction_rates(df, filename, lie_elicit_cols, belief_cols):
               f"honest={int((h1 == 1).sum())}, dishonest={int((h1 == -1).sum())}, unknown={int((h1 == 0).sum())}")
 
 
-def _load_baseline_beliefs(baseline_run_dir, archetype, model):
-    """Load eval_belief (and eval_accuracy if present) from the baseline run's metrics file.
-
-    Returns:
-        (eval_belief Series or None, eval_accuracy Series or None)
-        Returns (None, None) if the baseline has no belief columns (e.g. provided_facts
-        archetype where honesty is measured against ground_truth_extracted).
-
-    Raises:
-        FileNotFoundError: if the baseline metrics file does not exist.
-    """
-    baseline_path = metrics_path(baseline_run_dir, archetype, model, "no_steering", None)
-    if not baseline_path.exists():
-        raise FileNotFoundError(
-            f"Baseline metrics file not found: {baseline_path}\n"
-            "Run the metrics stage on the 'no_steering' baseline run first so that "
-            "steered runs can reuse its beliefs."
-        )
-    _, baseline_df = read_json_data(baseline_path)
-    if 'eval_belief' not in baseline_df.columns:
-        # No beliefs in baseline — archetype uses ground truth directly (e.g. provided_facts)
-        return None, None
-    eval_accuracy_series = baseline_df['eval_accuracy'] if 'eval_accuracy' in baseline_df.columns else None
-    return baseline_df['eval_belief'], eval_accuracy_series
-
-
 def process_evaluated_files(args):
     run_dir = Path(args.run_dir)
     archetypes = discover_archetype_dirs(run_dir, "evaluated")
@@ -631,13 +599,6 @@ def process_evaluated_files(args):
     for archetype in archetypes:
         eval_files = discover_files_in_stage(run_dir, archetype, "evaluated")
 
-        # Sort so baseline (no_steering) is processed first — steered files depend on it
-        # when baseline and steered outputs share a run dir.
-        eval_files = sorted(
-            eval_files,
-            key=lambda f: 0 if parse_json_filename(f.name)[1] == "no_steering" else 1,
-        )
-
         for eval_file in eval_files:
             model, technique, coefficient = parse_json_filename(eval_file.name)
 
@@ -646,43 +607,15 @@ def process_evaluated_files(args):
             # Process differently based on archetype
             is_stats_archetype = archetype == 'statistics'
 
-            is_baseline = technique in BASELINE_TECHNIQUES
-
             # Find all eval belief columns that end in _extracted
             eval_columns = [col for col in df.columns if col.startswith('eval(belief_system') and col.endswith('_extracted')]
 
-            if is_baseline:
-                # Baseline runs: compute beliefs from own columns (existing logic)
-                if eval_columns:
-                    beliefs_func = aggregate_eval_beliefs_statistics if is_stats_archetype else aggregate_eval_beliefs
-                    accuracy_func = eval_accuracy_statistics if is_stats_archetype else eval_accuracy
+            if eval_columns:
+                beliefs_func = aggregate_eval_beliefs_statistics if is_stats_archetype else aggregate_eval_beliefs
+                accuracy_func = eval_accuracy_statistics if is_stats_archetype else eval_accuracy
 
-                    df['eval_belief'] = df.apply(lambda row: beliefs_func(row, eval_columns), axis=1)
-                    df['eval_accuracy'] = df.apply(lambda row: accuracy_func(row), axis=1)
-            else:
-                # Steered files: use baseline beliefs when available, ignore any local belief columns.
-                # For archetypes without beliefs (e.g. provided_facts), honesty is measured
-                # against ground_truth_extracted — no belief columns needed.
-                if args.baseline_run_dir is None:
-                    raise ValueError(
-                        f"'{eval_file.name}' is a steered file (technique={technique}) but "
-                        "--baseline-run-dir was not passed. Steered runs reuse the "
-                        "unsteered baseline run's beliefs; point --baseline-run-dir at "
-                        "the matching no_steering run."
-                    )
-                baseline_beliefs, baseline_accuracy = _load_baseline_beliefs(
-                    args.baseline_run_dir, archetype, model,
-                )
-                if baseline_beliefs is not None:
-                    if len(baseline_beliefs) != len(df):
-                        raise ValueError(
-                            f"Row count mismatch: baseline has {len(baseline_beliefs)} rows "
-                            f"but steered file '{eval_file.name}' has {len(df)} rows. "
-                            "Ensure both runs used the same --test setting and archetypes."
-                        )
-                    df['eval_belief'] = baseline_beliefs.values
-                    if baseline_accuracy is not None:
-                        df['eval_accuracy'] = baseline_accuracy.values
+                df['eval_belief'] = df.apply(lambda row: beliefs_func(row, eval_columns), axis=1)
+                df['eval_accuracy'] = df.apply(lambda row: accuracy_func(row), axis=1)
 
             # find out how many user prompts we've run / evaluated e.g. eval(System Prompt + User Prompt)_run1_extracted
             lie_elicit_cols = [col for col in df.columns if col.startswith('eval(System Prompt + User Prompt)_run') and col.endswith('_extracted')]
@@ -709,13 +642,12 @@ def process_evaluated_files(args):
 def process_base_filtered_files(args):
     """Score a base/aligned model's honesty against this run's reused beliefs.
 
-    Mirrors how steered files reuse the no_steering ``eval_belief`` (see
-    :func:`process_evaluated_files`), but the answers come from a *different*
-    run (``--base-filtered-run-dir``, the aligned base model) while the beliefs
-    come from this run (``--run-dir``). Items are aligned across the two runs
-    by ``task_id``. The output is written as a ``base_filtered``
-    pseudo-technique metrics file under ``--run-dir`` so the process stage
-    pools it alongside this run's bars on the same item set.
+    The answers come from a *different* run (``--base-filtered-run-dir``, the
+    aligned base model) while the beliefs come from this run (``--run-dir``).
+    Items are aligned across the two runs by ``task_id``. The output is
+    written as a ``base_filtered`` pseudo-technique metrics file under
+    ``--run-dir`` so the process stage pools it alongside this run's bars on
+    the same item set.
     """
     run_dir = Path(args.run_dir)
     base_run_dir = Path(args.base_filtered_run_dir)
@@ -751,7 +683,7 @@ def process_base_filtered_files(args):
             )
         base_meta, base_df = read_json_data(base_path)
 
-        # ── Reuse this run's beliefs, aligned by task_id (mirrors the steered path) ───
+        # ── Reuse this run's beliefs, aligned by task_id ───
         if 'eval_belief' in em_df.columns:
             if 'task_id' not in em_df.columns or 'task_id' not in base_df.columns:
                 raise KeyError(
@@ -772,9 +704,9 @@ def process_base_filtered_files(args):
                 acc_by_id = dict(zip(em_df['task_id'], em_df['eval_accuracy']))
                 base_df['eval_accuracy'] = base_df['task_id'].map(acc_by_id).values
         # else: belief-less archetype (e.g. provided_facts) — honesty falls back to
-        # ground_truth_extracted inside the honesty funcs, exactly like the steered path.
+        # ground_truth_extracted inside the honesty funcs.
 
-        # ── Recompute honesty against the reused belief (same as steered) ─────
+        # ── Recompute honesty against the reused belief ─────
         is_stats_archetype = archetype == 'statistics'
         lie_elicit_cols = [
             col for col in base_df.columns
@@ -817,13 +749,6 @@ def run_metrics(args: argparse.Namespace) -> None:
 
 def add_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--run-dir", required=True)
-    parser.add_argument(
-        "--baseline-run-dir",
-        default=None,
-        help="Run dir of the matching unsteered (no_steering) run whose metrics "
-        "provide the beliefs for steered files. Required when --run-dir holds a "
-        "steered run.",
-    )
     parser.add_argument(
         "--base-filtered-run-dir",
         default=None,

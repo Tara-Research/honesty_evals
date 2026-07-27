@@ -1,11 +1,9 @@
 """Among Us eval — run stage.
 
 Port of persona_playground's src/AmongUs/main.py on top of the shared
-serving/steering core: compiles the CLI steering spec once, launches (or
-connects to) the steering server, and runs N games concurrently. Every agent
-— impostor and crewmate, steered or not — generates through the server
-(vendor/among-agents/amongagents/agent/steered_agent.py); the game config
-YAML decides which role carries the compiled steering payload.
+serving core: launches (or connects to) the generation server and runs N
+games concurrently. Every agent — impostor and crewmate — generates through
+the server (vendor/among-agents/amongagents/agent/server_agent.py).
 
 Game logs (agent-logs.json, agent-logs-compact.json, summary.json) are
 written by the vendored engine into <run-dir>/games/, where the judge and
@@ -20,13 +18,12 @@ import os
 import random
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 import numpy as np
 import yaml
 
 from honesty_evals.cli_common import (
-    build_spec_from_args,
     enable_thinking_value,
     sampling_dict,
     validate_server_args,
@@ -34,7 +31,6 @@ from honesty_evals.cli_common import (
 from honesty_evals.core.paths import CONFIGS_FOLDER, ROOT_FOLDER
 from honesty_evals.core.run_manifest import create_run_dir, write_json
 from honesty_evals.core.serving.launch import launched_server
-from honesty_evals.core.steering.compile import compile_steering
 
 DEFAULT_GAME_CONFIG = CONFIGS_FOLDER / "evals" / "among_us.yaml"
 
@@ -87,19 +83,11 @@ def _import_game_engine():
 def load_game_config(path: Path) -> Dict:
     with open(path, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
-    for section in ("game", "steered_roles"):
-        if section not in cfg:
-            raise KeyError(f"Game config {path} must contain a '{section}' section")
+    if "game" not in cfg:
+        raise KeyError(f"Game config {path} must contain a 'game' section")
     missing = [k for k in REQUIRED_GAME_KEYS if k not in cfg["game"]]
     if missing:
         raise KeyError(f"Game config {path} 'game' section is missing keys: {missing}")
-    for role in ("impostor", "crewmate"):
-        if role not in cfg["steered_roles"]:
-            raise KeyError(f"Game config {path} 'steered_roles' must contain '{role}'")
-        if not isinstance(cfg["steered_roles"][role], bool):
-            raise ValueError(
-                f"Game config {path} steered_roles.{role} must be a boolean"
-            )
     return cfg
 
 
@@ -107,7 +95,6 @@ async def _run_games(
     server_url: str,
     args: argparse.Namespace,
     game_settings: Dict,
-    role_payloads: Dict[str, Optional[Dict]],
 ) -> List[int]:
     AmongUs = _import_game_engine()
 
@@ -118,8 +105,8 @@ async def _run_games(
         sampling = dict(sampling_dict(args))
         sampling["seed"] = args.seed + game_index
         agent_config = {
-            "Impostor": "SteeredLLM",
-            "Crewmate": "SteeredLLM",
+            "Impostor": "ServerLLM",
+            "Crewmate": "ServerLLM",
             "IMPOSTOR_LLM_CHOICES": [args.model],
             "CREWMATE_LLM_CHOICES": [args.model],
             "SERVER_CONFIG": {
@@ -127,7 +114,6 @@ async def _run_games(
                 "model_id": args.model,
                 "sampling": sampling,
                 "enable_thinking": enable_thinking_value(args),
-                "role_steering": role_payloads,
             },
         }
         game = AmongUs(
@@ -149,24 +135,15 @@ async def _run_games(
 
 def run_run(args: argparse.Namespace) -> None:
     validate_server_args(args)
-    spec = build_spec_from_args(args, model_id=args.model)
 
     game_config_path = Path(args.game_config)
     game_cfg = load_game_config(game_config_path)
-    steered_roles = game_cfg["steered_roles"]
-
-    if spec.is_steered and not any(steered_roles.values()):
-        raise SystemExit(
-            "Steered spec given but the game config marks no role as steered "
-            f"(steered_roles={steered_roles} in {game_config_path})"
-        )
 
     run_dir = create_run_dir(
         eval_name="among_us",
         run_name=args.run_name,
         manifest={
             "model": args.model,
-            "steering": spec.to_dict(),
             "game_config_path": str(game_config_path),
             "game_config": game_cfg,
             "num_games": args.num_games,
@@ -174,13 +151,6 @@ def run_run(args: argparse.Namespace) -> None:
             "enable_thinking": enable_thinking_value(args),
         },
     )
-
-    compiled = compile_steering(spec, model_id=args.model, payload_dir=str(run_dir / "steering"))
-    steering_payload = compiled.to_dict() if compiled else None
-    role_payloads = {
-        role: (steering_payload if steered else None)
-        for role, steered in steered_roles.items()
-    }
 
     # The vendored engine writes its logs (agent-logs.json,
     # agent-logs-compact.json, summary.json) to $EXPERIMENT_PATH — the one
@@ -202,11 +172,9 @@ def run_run(args: argparse.Namespace) -> None:
             max_model_len=args.max_model_len,
             gpu_memory_utilization=args.gpu_memory_utilization,
         ) as url:
-            winners = asyncio.run(_run_games(url, args, game_cfg["game"], role_payloads))
+            winners = asyncio.run(_run_games(url, args, game_cfg["game"]))
     else:
-        winners = asyncio.run(
-            _run_games(args.server_url, args, game_cfg["game"], role_payloads)
-        )
+        winners = asyncio.run(_run_games(args.server_url, args, game_cfg["game"]))
 
     impostor_wins = sum(w in IMPOSTOR_WIN_CODES for w in winners)
     write_json(
