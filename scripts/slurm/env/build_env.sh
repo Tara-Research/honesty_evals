@@ -14,9 +14,9 @@
 # fallback. This avoids source builds of packages whose sdists don't compile
 # on the gentoo stack (e.g. apache-tvm-ffi, whose sdist is broken).
 #
-# NOTE: the pinned vllm (see pyproject.toml) is typically NEWER than the
-# cluster wheelhouse's vllm, so it installs from PyPI together with its
-# matching torch. That is expected; run this on a login node with internet.
+# The pinned vllm (see pyproject.toml) tracks the newest version the cluster
+# wheelhouse carries, so on Alliance it installs offline as
+# <version>+computecanada; PyPI is only the fallback off-cluster.
 #
 # The build ends with backfill_missing_deps + verify_env (scripts/slurm/env/
 # _common.sh), which install anything `pip check` reports as unsatisfied and
@@ -30,6 +30,13 @@ VENV="${1:-${HONESTY_EVALS_VENV:-$SCRATCH/honesty_evals_venv}}"
 
 # shellcheck source=scripts/slurm/env/_common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
+
+# Login-node /tmp is small and RAM-backed: pip unpacking a large PyPI wheel
+# there (vllm ~300MB, torch ~900MB) gets cgroup-Killed mid-install. Keep
+# pip's temp and cache on scratch instead.
+export TMPDIR="$SCRATCH/.pip-tmp"
+export PIP_CACHE_DIR="$SCRATCH/.pip-cache"
+mkdir -p "$TMPDIR" "$PIP_CACHE_DIR"
 
 # The vllm pin the venv must end up with (single source of truth: pyproject).
 VLLM_PIN="$(grep -oE 'vllm==[0-9.]+' "$REPO_ROOT/pyproject.toml" | head -1)"
@@ -112,12 +119,13 @@ done
 # (missing cython sources) — wheel or bust, and never a source build.
 pip_wheel_only apache-tvm-ffi || echo "[build_env] WARNING: apache-tvm-ffi has no wheel; install continues (--only-binary guards the sdist)"
 
-# vllm must arrive as a WHEEL: its sdist self-versions as e.g. 0.26.0+cu126,
-# which pip discards as "inconsistent" against the ==0.26.0 pin. The PyPI
-# wheels are manylinux, which Alliance's PYTHONPATH-injected _manylinux shim
-# rejects — pip_wheel_only clears PYTHONPATH as its last resort to accept
-# them (this also pulls the matching torch as manylinux wheels).
-echo "[build_env] installing $VLLM_PIN (wheel only)"
+# vllm comes from the cluster wheelhouse where possible (installs as e.g.
+# 0.25.0+computecanada — the local suffix satisfies the pin, and its deps
+# resolve against cluster-patched torch wheels). The PyPI fallback must be a
+# WHEEL: vllm's sdist self-versions as e.g. 0.25.0+cu126, which pip discards
+# as "inconsistent" against the pin; pip_wheel_only's PYTHONPATH-cleared last
+# resort also gets past Alliance's manylinux-blocking shim off-cluster.
+echo "[build_env] installing $VLLM_PIN (wheelhouse first)"
 pip_wheel_only "$VLLM_PIN"
 
 echo "[build_env] installing honesty_evals"
@@ -130,7 +138,9 @@ echo "[build_env] sanity check"
 python - <<EOF
 import vllm
 expected = "$VLLM_PIN".split("==")[1]
-assert vllm.__version__ == expected, f"vllm {vllm.__version__} != pinned {expected}"
+# Wheelhouse builds carry a local suffix (e.g. 0.25.0+computecanada).
+public = vllm.__version__.split("+")[0]
+assert public == expected, f"vllm {vllm.__version__} != pinned {expected}"
 print("stock vllm", vllm.__version__)
 EOF
 

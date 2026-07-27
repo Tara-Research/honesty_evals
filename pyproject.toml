@@ -5,9 +5,12 @@ description = "Honesty evaluations for LLMs: AmongUs, AuditBench, MASK, Emergent
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+    # Latest version available in the Alliance (tamia) wheelhouse; installs as
+    # 0.25.0+computecanada there (the local suffix satisfies the pin) and from
+    # PyPI elsewhere. Has qwen3_5 (first in 0.17.0), so Qwen3.6-27B serves.
     # vLLM has no Windows wheels; the CLI imports it lazily, so a Windows dev
     # box can still `pip install -e .` and run the CPU-only stages.
-    "vllm==0.26.0; sys_platform != 'win32'",
+    "vllm==0.25.0; sys_platform != 'win32'",
     "torch",
     "transformers",
     "pyyaml",
