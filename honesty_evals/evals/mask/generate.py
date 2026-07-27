@@ -272,8 +272,9 @@ def add_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--lie-k",
         type=int,
-        required=True,
-        help="Number of lying runs K per row (K independent samples per pressure prompt)",
+        default=1,
+        help="Number of lying runs K per row (K independent samples per pressure "
+        "prompt). Default: 1",
     )
     parser.add_argument(
         "--test",

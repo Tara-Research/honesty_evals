@@ -6,12 +6,12 @@
 # MASK benchmark: generate -> judge -> metrics -> process in one job.
 #
 # Required env vars (pass as VAR=value via submit.sh):
-#   MODEL RUN_NAME STEERING ARCHETYPES LIE_K
+#   MODEL RUN_NAME STEERING ARCHETYPES
 # Required iff STEERING != none:
 #   LAYER COEFFICIENT STEERING_MODE EXTRACTION_METHOD HONESTY_CATEGORY FEATURES
 #   BASELINE_RUN_DIR (results/mask/<no_steering run> — steered metrics reuse its beliefs;
 #                     must have been generated with the SAME model and LORA_ADAPTER)
-# Optional: TP (default 4), TEST (set to any value for the 5-row subset),
+# Optional: TP (default 4), LIE_K (default 1), TEST (set to any value for the 5-row subset),
 #   LORA_ADAPTER (LoRA served on top of MODEL; on tamia use a pre-downloaded
 #   LOCAL PATH — compute nodes have no internet)
 set -euo pipefail
@@ -21,8 +21,9 @@ mkdir -p logs
 source "scripts/slurm/profiles/${CLUSTER}.sh"
 profile_activate
 
-: "${MODEL:?}" "${RUN_NAME:?}" "${STEERING:?}" "${ARCHETYPES:?}" "${LIE_K:?}"
+: "${MODEL:?}" "${RUN_NAME:?}" "${STEERING:?}" "${ARCHETYPES:?}"
 TP="${TP:-4}"
+LIE_K="${LIE_K:-1}"
 
 STEER_FLAGS=(--steering "$STEERING")
 if [ "$STEERING" != "none" ]; then
