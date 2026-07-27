@@ -15,9 +15,19 @@
 #   opencv-python-headless  Same dummy-wheel treatment. Declared by vllm, but
 #                           vllm imports fine without it for the text-only
 #                           models these evals serve.
+#   torchcodec              MUST STAY UNINSTALLED. Declared by vllm, but the
+#                           available wheel's libtorchcodec_core*.so links
+#                           against libnvrtc.so.13 (CUDA 13) while torch here is
+#                           built for CUDA 12.x — dlopen fails. vllm guards the
+#                           import with `except ImportError`, but a broken
+#                           torchcodec raises RuntimeError, so it is NOT caught
+#                           and `import vllm` dies outright (SLURM job 385274).
+#                           Absent, the guard fires and vllm imports fine; it is
+#                           only needed for video decoding, which no eval uses.
 #
-# Retrying these just burns build time on installs that cannot succeed.
-BENIGN_MISSING=(pillow pyarrow opencv-python-headless)
+# Retrying these just burns build time on installs that cannot succeed — and for
+# torchcodec, installing it actively breaks the venv.
+BENIGN_MISSING=(pillow pyarrow opencv-python-headless torchcodec)
 
 # ---------------------------------------------------------------------------
 # backfill_missing_deps <label>
