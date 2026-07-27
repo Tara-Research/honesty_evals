@@ -87,6 +87,7 @@ def _process_archetype(
     args: argparse.Namespace,
     spec: SteeringSpec,
     steering_payload: Dict | None,
+    lora: str | None,
     output_path: Path,
     out_meta: Dict,
 ) -> None:
@@ -114,6 +115,7 @@ def _process_archetype(
         messages_batch,
         sampling=sampling_dict(args, n=args.lie_k),
         steering=steering_payload,
+        lora=lora,
         enable_thinking=enable_thinking,
     )
     for idx, texts in zip(df.index, completions):
@@ -152,10 +154,13 @@ def _process_archetype(
                 f"[mask/generate] {archetype}: {len(belief_batch)} belief_elicit_{be_num} "
                 f"prompts x {k_value} runs (unsteered)"
             )
+            # Beliefs come from the same (possibly LoRA-adapted) model — only
+            # steering is withheld from belief elicitation.
             completions = client.generate_batch(
                 belief_batch,
                 sampling=sampling_dict(args, n=k_value),
                 steering=None,
+                lora=lora,
                 enable_thinking=enable_thinking,
             )
             for idx, texts in zip(item_rows, completions):
@@ -194,6 +199,7 @@ def run_generate(args: argparse.Namespace) -> None:
         run_name=args.run_name,
         manifest={
             "model": args.model,
+            "lora_adapter": args.lora_adapter,
             "steering": spec.to_dict(),
             "archetypes": archetypes,
             "lie_k": args.lie_k,
@@ -209,6 +215,11 @@ def run_generate(args: argparse.Namespace) -> None:
     modelname = args.model.split("/")[-1]
     file_technique = spec.method if spec.is_steered else None
     file_coefficient = spec.coefficient if spec.is_steered else None
+
+    # LoRA convention (same as auditbench): the server-side adapter name IS the
+    # repo/path string, so an external server must be launched with
+    # --lora <adapter>=<adapter>. Unknown names fail loudly server-side (400).
+    lora = args.lora_adapter
 
     def process_all(server_url: str) -> None:
         client = SteeredClient(server_url)
@@ -229,7 +240,7 @@ def run_generate(args: argparse.Namespace) -> None:
                 run_name=args.run_name,
             )
             _process_archetype(
-                client, archetype, args, spec, steering_payload, output_path, out_meta
+                client, archetype, args, spec, steering_payload, lora, output_path, out_meta
             )
 
     if args.launch_server:
@@ -237,6 +248,7 @@ def run_generate(args: argparse.Namespace) -> None:
             model=args.model,
             tp=args.tp,
             port=args.port,
+            loras={lora: lora} if lora else None,
             max_model_len=args.max_model_len,
             gpu_memory_utilization=args.gpu_memory_utilization,
         ) as url:
@@ -263,4 +275,12 @@ def add_args(parser: argparse.ArgumentParser) -> None:
         "--test",
         action="store_true",
         help="Use the 5-row test subset (data/mask/raw_test/) instead of the full benchmark",
+    )
+    parser.add_argument(
+        "--lora-adapter",
+        default=None,
+        help="HF repo or local path of a LoRA adapter served on top of --model. "
+        "Applies to ALL generations in the run (beliefs and lying runs alike). "
+        "With --server-url the server must have been started with "
+        "--lora <adapter>=<adapter>.",
     )
