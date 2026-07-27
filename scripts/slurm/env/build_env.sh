@@ -14,12 +14,28 @@
 # packages arrive as prebuilt, cluster-patched wheels; PyPI is only the
 # fallback. This avoids source builds of packages whose sdists don't compile
 # on the gentoo stack (e.g. apache-tvm-ffi, whose sdist is broken).
+#
+# The build ends with backfill_missing_deps + verify_env (scripts/slurm/env/
+# _common.sh), which install anything `pip check` reports as unsatisfied and
+# then FAIL the build if the venv still cannot import what the evals need.
+# Without that gate a half-installed venv looks fine here and only breaks once
+# a job is on a GPU node.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 VENV="${1:-${HONESTY_EVALS_VENV:-$SCRATCH/honesty_evals_venv}}"
 
-module load python/3.11 cuda 2>/dev/null || true
+# shellcheck source=scripts/slurm/env/_common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
+
+# Modules MUST be loaded BEFORE the venv is created/activated. `arrow` and
+# `opencv` are not optional extras on Alliance: the cluster ships deliberately
+# failing dummy wheels for pyarrow and opencv whose error message tells you to
+# load the module and re-run. Loaded one at a time so a name that does not
+# exist on this cluster (Mila has no arrow/opencv) cannot block the others.
+for _mod in gcc python/3.11 cuda arrow opencv; do
+    module load "$_mod" 2>/dev/null || echo "[build_env] note: module '$_mod' unavailable, skipping"
+done
 
 echo "[build_env] creating venv at $VENV"
 python -m venv "$VENV"
@@ -72,9 +88,11 @@ VLLM_USE_PRECOMPILED=1 pip install \
 echo "[build_env] installing honesty_evals"
 pip install --prefer-binary --editable "$REPO_ROOT[dev]"
 
+backfill_missing_deps build_env
+verify_env build_env
+
 echo "[build_env] sanity check"
 python -c "import vllm.steer_vectors.algorithms as a; print('steer algorithms:', sorted(__import__('vllm.steer_vectors.algorithms.factory', fromlist=['ALGORITHM_REGISTRY']).ALGORITHM_REGISTRY))"
-python -c "import honesty_evals; print('honesty_evals OK')"
 
 echo "[build_env] done: $VENV"
 echo "[build_env] NOTE: verify the fork's vLLM can serve the judge model"

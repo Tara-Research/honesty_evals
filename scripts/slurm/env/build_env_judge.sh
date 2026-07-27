@@ -17,7 +17,15 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 VENV="${1:-${HONESTY_EVALS_JUDGE_VENV:-$SCRATCH/honesty_evals_judge_venv}}"
 
-module load python/3.11 cuda 2>/dev/null || true
+# shellcheck source=scripts/slurm/env/_common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
+
+# Same module policy as build_env.sh: loaded BEFORE venv creation, one at a
+# time, and arrow / opencv are required for pyarrow / opencv to install at all
+# on Alliance.
+for _mod in gcc python/3.11 cuda arrow opencv; do
+    module load "$_mod" 2>/dev/null || echo "[build_env_judge] note: module '$_mod' unavailable, skipping"
+done
 
 python -m venv "$VENV"
 source "$VENV/bin/activate"
@@ -81,6 +89,9 @@ pip_wheel_only apache-tvm-ffi
 # In case vllm came from PyPI above, make sure nothing pulled in the broken
 # apache-tvm-ffi sdist path; then install the repo.
 pip install --prefer-binary --only-binary apache-tvm-ffi --editable "$REPO_ROOT"
+
+backfill_missing_deps build_env_judge
+verify_env build_env_judge
 
 python -c "import vllm; print('stock vllm', vllm.__version__)"
 echo "[build_env_judge] done: $VENV"
