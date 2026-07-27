@@ -179,14 +179,17 @@ def run_generate(args: argparse.Namespace) -> None:
     validate_server_args(args)
     spec = build_spec_from_args(args, model_id=args.model)
 
-    archetypes = [a.strip() for a in args.archetypes.split(",") if a.strip()]
-    if not archetypes:
-        raise SystemExit("--archetypes must name at least one archetype")
-    unknown = set(archetypes) - set(KNOWN_ARCHETYPES)
-    if unknown:
-        raise SystemExit(
-            f"Unknown archetypes {sorted(unknown)}; known: {sorted(KNOWN_ARCHETYPES)}"
-        )
+    if args.archetypes.strip() == "all":
+        archetypes = sorted(KNOWN_ARCHETYPES)
+    else:
+        archetypes = [a.strip() for a in args.archetypes.split(",") if a.strip()]
+        if not archetypes:
+            raise SystemExit("--archetypes must name at least one archetype")
+        unknown = set(archetypes) - set(KNOWN_ARCHETYPES)
+        if unknown:
+            raise SystemExit(
+                f"Unknown archetypes {sorted(unknown)}; known: {sorted(KNOWN_ARCHETYPES)}"
+            )
     for archetype in archetypes:
         path = raw_data_path(archetype, test=args.test)
         if not path.exists():
@@ -263,7 +266,8 @@ def add_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--archetypes",
         required=True,
-        help=f"Comma-separated MASK archetypes to run (known: {', '.join(sorted(KNOWN_ARCHETYPES))})",
+        help="Comma-separated MASK archetypes to run, or 'all' "
+        f"(known: {', '.join(sorted(KNOWN_ARCHETYPES))})",
     )
     parser.add_argument(
         "--lie-k",
