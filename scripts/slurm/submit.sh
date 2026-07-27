@@ -5,7 +5,7 @@
 #
 # Examples:
 #   bash scripts/slurm/submit.sh --cluster tamia generalized.sbatch \
-#       MODEL=Qwen/Qwen3.6-27B RUN_NAME=gen_sttp_L36 STEERING=sttp LAYER=36 COEFFICIENT=3.0
+#       MODEL=Qwen/Qwen3.6-27B RUN_NAME=gen_qwen36_baseline
 #
 # VAR=value pairs are exported into the job environment; each *.sbatch script
 # documents the variables it requires (they fail loudly when unset).
