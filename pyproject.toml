@@ -1,10 +1,13 @@
 [project]
 name = "honesty-evals"
 version = "0.1.0"
-description = "Honesty evaluations for steered LLMs: AmongUs, AuditBench, MASK, Emergent Misalignment, and the generalized honesty test — all served through a steering-enabled vLLM fork."
+description = "Honesty evaluations for LLMs: AmongUs, AuditBench, MASK, Emergent Misalignment, and the generalized honesty test — all served through stock vLLM."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+    # vLLM has no Windows wheels; the CLI imports it lazily, so a Windows dev
+    # box can still `pip install -e .` and run the CPU-only stages.
+    "vllm==0.26.0; sys_platform != 'win32'",
     "torch",
     "transformers",
     "pyyaml",
