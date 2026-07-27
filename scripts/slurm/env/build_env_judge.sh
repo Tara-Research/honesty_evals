@@ -37,6 +37,30 @@ pip_prefer_wheelhouse() {
     fi
 }
 
+# Wheel-only helper for packages whose sdist must NEVER be built. Tries, in
+# order: wheelhouse -> PyPI wheel -> PyPI wheel with PYTHONPATH cleared
+# (Alliance blocks manylinux tags via a PYTHONPATH-injected _manylinux shim;
+# the gentoo-2023 glibc is new enough for manylinux_2_28 wheels).
+pip_wheel_only() {
+    local pkg="$1"
+    if [ "$have_wheelhouse" = 1 ] && pip install --no-index "$pkg"; then
+        echo "[build_env_judge] $pkg <- cluster wheelhouse"
+        return 0
+    fi
+    if pip install --only-binary :all: "$pkg"; then
+        echo "[build_env_judge] $pkg <- PyPI wheel"
+        return 0
+    fi
+    if PYTHONPATH= pip install --only-binary :all: "$pkg"; then
+        echo "[build_env_judge] $pkg <- PyPI wheel (PYTHONPATH cleared to accept manylinux)"
+        return 0
+    fi
+    echo "[build_env_judge] ERROR: no installable wheel for $pkg on this platform." >&2
+    echo "            Diagnose with: avail_wheels $pkg ; and" >&2
+    echo "            python -c \"from packaging.tags import sys_tags; print(any('manylinux' in str(t) for t in sys_tags()))\"" >&2
+    return 1
+}
+
 pip_prefer_wheelhouse pip
 
 PRESEED=(
@@ -44,13 +68,15 @@ PRESEED=(
     numpy
     scipy
     pandas
-    apache-tvm-ffi
     ninja
     vllm
 )
 for pkg in "${PRESEED[@]}"; do
     pip_prefer_wheelhouse "$pkg" || echo "[build_env_judge] WARNING: could not pre-seed $pkg"
 done
+
+# apache-tvm-ffi's sdist is broken (missing cython sources) — wheel or bust.
+pip_wheel_only apache-tvm-ffi
 
 # In case vllm came from PyPI above, make sure nothing pulled in the broken
 # apache-tvm-ffi sdist path; then install the repo.
