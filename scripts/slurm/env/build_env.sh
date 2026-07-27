@@ -119,45 +119,14 @@ done
 # (missing cython sources) — wheel or bust, and never a source build.
 pip_wheel_only apache-tvm-ffi || echo "[build_env] WARNING: apache-tvm-ffi has no wheel; install continues (--only-binary guards the sdist)"
 
-# vllm comes from the cluster wheelhouse (installs as e.g.
+# vllm comes from the cluster wheelhouse where possible (installs as e.g.
 # 0.25.0+computecanada — the local suffix satisfies the pin, and its deps
-# resolve against cluster-patched torch wheels). `--no-index` is atomic: ONE
-# dependency missing from the wheelhouse aborts the whole resolve, and the
-# naive fallback (resolve everything against PyPI) downloads the full
-# GB-scale dependency tree in one long pip process, which the login node's
-# resource limits SIGKILL. So instead: retry the wheelhouse install, and on
-# each failure backfill just the single missing package from PyPI (these are
-# small pure-python stragglers — anything heavy IS in the wheelhouse).
-install_vllm_wheelhouse_first() {
-    local out missing
-    for _ in $(seq 1 15); do
-        if out=$(pip install --no-index "$VLLM_PIN" 2>&1); then
-            echo "[build_env] $VLLM_PIN <- cluster wheelhouse"
-            return 0
-        fi
-        missing=$(printf '%s\n' "$out" \
-            | sed -n 's/.*No matching distribution found for \([^ ]*\).*/\1/p' | head -1)
-        if [ -z "$missing" ]; then
-            echo "[build_env] wheelhouse install of $VLLM_PIN failed for a reason other than a missing package:" >&2
-            printf '%s\n' "$out" | tail -30 >&2
-            return 1
-        fi
-        echo "[build_env] wheelhouse lacks '$missing'; backfilling it from PyPI"
-        pip install --prefer-binary --only-binary apache-tvm-ffi "$missing" \
-            || pip_wheel_only "$missing" || return 1
-    done
-    echo "[build_env] ERROR: still unresolved after 15 backfill rounds" >&2
-    return 1
-}
-
-echo "[build_env] installing $VLLM_PIN"
-if [ "$have_wheelhouse" = 1 ]; then
-    install_vllm_wheelhouse_first
-else
-    # Off-cluster: must be a WHEEL (vllm's sdist self-versions as e.g.
-    # 0.25.0+cu126, which pip discards as inconsistent against the pin).
-    pip_wheel_only "$VLLM_PIN"
-fi
+# resolve against cluster-patched torch wheels). The PyPI fallback must be a
+# WHEEL: vllm's sdist self-versions as e.g. 0.25.0+cu126, which pip discards
+# as "inconsistent" against the pin; pip_wheel_only's PYTHONPATH-cleared last
+# resort also gets past Alliance's manylinux-blocking shim off-cluster.
+echo "[build_env] installing $VLLM_PIN (wheelhouse first)"
+pip_wheel_only "$VLLM_PIN"
 
 echo "[build_env] installing honesty_evals"
 pip install --prefer-binary --only-binary apache-tvm-ffi,vllm --editable "$REPO_ROOT[dev]"
