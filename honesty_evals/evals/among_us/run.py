@@ -37,6 +37,11 @@ DEFAULT_GAME_CONFIG = CONFIGS_FOLDER / "evals" / "among_us.yaml"
 GAMES_DIR = "games"
 WINNERS_FILE = "winners.json"
 
+# Player identities the engine assigns (vendor/among-agents/amongagents/envs/
+# player.py: Crewmate / Impostor subclasses). --lora-roles is checked against
+# these so a typo fails at submit time instead of silently steering nobody.
+KNOWN_ROLES = ("Impostor", "Crewmate")
+
 # Keys of amongagents' game_config dicts (envs/configs/game_config.py); the
 # YAML `game:` section must provide all of them — no engine defaults exist.
 REQUIRED_GAME_KEYS = (
@@ -91,10 +96,33 @@ def load_game_config(path: Path) -> Dict:
     return cfg
 
 
+def role_loras_from_args(args: argparse.Namespace) -> Dict[str, str]:
+    """Map player identity -> LoRA adapter name for this run.
+
+    Adapter naming follows the same convention as the other evals: the
+    server-side adapter name IS the repo/path string, so an externally launched
+    server must register it as ``--lora <adapter>=<adapter>``.
+    """
+    if args.lora_adapter is None:
+        if args.lora_roles is not None:
+            raise SystemExit("--lora-roles requires --lora-adapter")
+        return {}
+
+    raw = args.lora_roles if args.lora_roles is not None else "Impostor"
+    roles = [r.strip() for r in raw.split(",") if r.strip()]
+    if not roles:
+        raise SystemExit("--lora-roles must name at least one role")
+    unknown = sorted(set(roles) - set(KNOWN_ROLES))
+    if unknown:
+        raise SystemExit(f"Unknown --lora-roles {unknown}; known roles: {list(KNOWN_ROLES)}")
+    return {role: args.lora_adapter for role in roles}
+
+
 async def _run_games(
     server_url: str,
     args: argparse.Namespace,
     game_settings: Dict,
+    role_loras: Dict[str, str],
 ) -> List[int]:
     AmongUs = _import_game_engine()
 
@@ -114,6 +142,10 @@ async def _run_games(
                 "model_id": args.model,
                 "sampling": sampling,
                 "enable_thinking": enable_thinking_value(args),
+                # Each agent picks its own adapter by player.identity, so a
+                # steered impostor and a base-model crewmate coexist in one
+                # game — vLLM applies LoRA per request.
+                "role_loras": role_loras,
             },
         }
         game = AmongUs(
@@ -138,12 +170,17 @@ def run_run(args: argparse.Namespace) -> None:
 
     game_config_path = Path(args.game_config)
     game_cfg = load_game_config(game_config_path)
+    # Validated before the run dir is created so a bad --lora-roles fails
+    # without leaving a manifest behind that blocks a re-run.
+    role_loras = role_loras_from_args(args)
 
     run_dir = create_run_dir(
         eval_name="among_us",
         run_name=args.run_name,
         manifest={
             "model": args.model,
+            "lora_adapter": args.lora_adapter,
+            "role_loras": role_loras,
             "game_config_path": str(game_config_path),
             "game_config": game_cfg,
             "num_games": args.num_games,
@@ -151,6 +188,8 @@ def run_run(args: argparse.Namespace) -> None:
             "enable_thinking": enable_thinking_value(args),
         },
     )
+    if role_loras:
+        print(f"[among_us/run] per-role LoRA: {role_loras}")
 
     # The vendored engine writes its logs (agent-logs.json,
     # agent-logs-compact.json, summary.json) to $EXPERIMENT_PATH — the one
@@ -169,12 +208,15 @@ def run_run(args: argparse.Namespace) -> None:
             model=args.model,
             tp=args.tp,
             port=args.port,
+            loras={args.lora_adapter: args.lora_adapter} if args.lora_adapter else None,
             max_model_len=args.max_model_len,
             gpu_memory_utilization=args.gpu_memory_utilization,
         ) as url:
-            winners = asyncio.run(_run_games(url, args, game_cfg["game"]))
+            winners = asyncio.run(_run_games(url, args, game_cfg["game"], role_loras))
     else:
-        winners = asyncio.run(_run_games(args.server_url, args, game_cfg["game"]))
+        winners = asyncio.run(
+            _run_games(args.server_url, args, game_cfg["game"], role_loras)
+        )
 
     impostor_wins = sum(w in IMPOSTOR_WIN_CODES for w in winners)
     write_json(
@@ -199,4 +241,18 @@ def add_args(parser: argparse.ArgumentParser) -> None:
         "--game-config",
         required=True,
         help=f"Game/role config YAML (e.g. {DEFAULT_GAME_CONFIG})",
+    )
+    parser.add_argument(
+        "--lora-adapter",
+        default=None,
+        help="HF repo or local path of a LoRA adapter served on top of --model "
+        "and applied only to the roles named by --lora-roles. Omit to run every "
+        "agent on the base model. With --server-url the server must already have "
+        "it registered as --lora <adapter>=<adapter>.",
+    )
+    parser.add_argument(
+        "--lora-roles",
+        default=None,
+        help=f"Comma-separated roles that use --lora-adapter (known: "
+        f"{', '.join(KNOWN_ROLES)}). Default when --lora-adapter is set: Impostor.",
     )

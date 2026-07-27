@@ -8,7 +8,10 @@
 #
 # Required env vars (pass as VAR=value via submit.sh):
 #   MODEL RUN_NAME NUM_GAMES GAME_CONFIG
-# Optional: TP (default 4)
+# Optional: TP (default 4),
+#   LORA_ADAPTER (LoRA applied to LORA_ROLES only; on tamia use a pre-downloaded
+#   LOCAL PATH — compute nodes have no internet),
+#   LORA_ROLES (comma-separated, default Impostor when LORA_ADAPTER is set)
 set -euo pipefail
 cd "$SLURM_SUBMIT_DIR"
 mkdir -p logs
@@ -25,6 +28,8 @@ honesty-evals among-us run \
     --run-name "$RUN_NAME" \
     --num-games "$NUM_GAMES" \
     --game-config "$GAME_CONFIG" \
+    ${LORA_ADAPTER:+--lora-adapter "$LORA_ADAPTER"} \
+    ${LORA_ROLES:+--lora-roles "$LORA_ROLES"} \
     --launch-server --tp "$TP" --port 8192 \
     --max-new-tokens 1024 --temperature 1.0 --top-p 1.0 --seed 42
 

@@ -21,7 +21,15 @@ batch_inference_pool.py. In this port:
           "model_id":       str,            # for logging only (server owns the model)
           "sampling":       dict,           # temperature/top_p/max_tokens/n/seed
           "enable_thinking": bool | None,   # chat-template thinking flag
+          "role_loras":     dict,           # player identity -> LoRA name | None
       }
+
+  * ``role_loras`` gives per-role model differentiation: each agent looks up
+    its own ``player.identity`` ("Impostor" / "Crewmate", see envs/player.py)
+    and sends that LoRA name on every request, so impostors can run a
+    fine-tuned adapter while crewmates stay on the base model *in the same
+    game*. vLLM applies LoRA per request, so both live in one server and one
+    batch. An empty dict means every agent uses the base model.
 
   * Generation errors are NOT swallowed any more (the original returned
     "SPEAK: ..." after catching any exception); a failed request raises and
@@ -42,6 +50,7 @@ _REQUIRED_SERVER_CONFIG_KEYS = (
     "model_id",
     "sampling",
     "enable_thinking",
+    "role_loras",
 )
 
 
@@ -70,13 +79,22 @@ class ServerLLMAgent(LLMAgent):
         self._sampling: Dict = server_config["sampling"]
         self._enable_thinking: Optional[bool] = server_config["enable_thinking"]
 
-        print(f"[ServerLLMAgent] {player.name} ({player.identity})")
+        # Per-role adapter: None means this agent runs the base model. Unknown
+        # identities simply get None rather than raising, so adding a role to
+        # the engine cannot break games that do not use LoRA at all.
+        self._lora: Optional[str] = server_config["role_loras"].get(player.identity)
+
+        print(
+            f"[ServerLLMAgent] {player.name} ({player.identity}) "
+            f"lora={self._lora or 'base'}"
+        )
 
     async def send_request(self, messages):
         """Generate through the generation server (async HTTP, batched server-side)."""
         completions = await self._client.agenerate(
             messages,
             sampling=self._sampling,
+            lora=self._lora,
             enable_thinking=self._enable_thinking,
         )
         return completions[0]
