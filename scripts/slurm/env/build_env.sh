@@ -112,8 +112,16 @@ done
 # (missing cython sources) — wheel or bust, and never a source build.
 pip_wheel_only apache-tvm-ffi || echo "[build_env] WARNING: apache-tvm-ffi has no wheel; install continues (--only-binary guards the sdist)"
 
-echo "[build_env] installing honesty_evals (pulls $VLLM_PIN + matching torch)"
-pip install --prefer-binary --only-binary apache-tvm-ffi --editable "$REPO_ROOT[dev]"
+# vllm must arrive as a WHEEL: its sdist self-versions as e.g. 0.26.0+cu126,
+# which pip discards as "inconsistent" against the ==0.26.0 pin. The PyPI
+# wheels are manylinux, which Alliance's PYTHONPATH-injected _manylinux shim
+# rejects — pip_wheel_only clears PYTHONPATH as its last resort to accept
+# them (this also pulls the matching torch as manylinux wheels).
+echo "[build_env] installing $VLLM_PIN (wheel only)"
+pip_wheel_only "$VLLM_PIN"
+
+echo "[build_env] installing honesty_evals"
+pip install --prefer-binary --only-binary apache-tvm-ffi,vllm --editable "$REPO_ROOT[dev]"
 
 backfill_missing_deps build_env
 verify_env build_env
