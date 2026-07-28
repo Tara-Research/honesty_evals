@@ -33,9 +33,21 @@ fi
 
 source "$PROFILE"   # defines SUBMIT_ARGS
 
-EXPORTS="ALL,CLUSTER=$CLUSTER"
+# Export each VAR=value into our own environment and hand the whole thing to
+# sbatch with --export=ALL.
+#
+# Do NOT build a comma-joined --export list: sbatch treats commas as separators
+# BETWEEN variables, so any value that contains one is silently truncated and
+# its remainder is read as further variable names. `STAGES=judge,metrics,process`
+# arrived in the job as `STAGES=judge` (job 385466 judged, then skipped metrics
+# and process without an error), and `ARCHETYPES=known_facts,statistics` or
+# `LORA_ROLES=Impostor,Crewmate` would silently drop everything after the comma.
+export CLUSTER
 for kv in "$@"; do
-    EXPORTS+=",${kv}"
+    case "$kv" in
+        *=*) export "$kv" ;;
+        *) echo "arguments must be VAR=value, got '$kv'" >&2; exit 1 ;;
+    esac
 done
 
-sbatch "${SUBMIT_ARGS[@]}" --export="$EXPORTS" "$SBATCH_SCRIPT"
+sbatch "${SUBMIT_ARGS[@]}" --export=ALL "$SBATCH_SCRIPT"
