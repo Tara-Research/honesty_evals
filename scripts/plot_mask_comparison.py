@@ -145,7 +145,13 @@ def load_run(path: str) -> Dict[str, List[Dict]]:
 
 
 def matched_task_ids(arms: Dict[str, Dict[str, List[Dict]]]) -> Dict[str, set]:
-    """Per archetype, the task_ids where EVERY arm established a belief."""
+    """Per archetype, the task_ids where EVERY arm established a belief.
+
+    With a single arm this degenerates to that arm's own scoreable items — an
+    intersection over one set is that set. That is still a useful view (it is the
+    91.54-vs-94.74 correction on known_facts), but it is NOT a cross-arm match,
+    and the caller must not label it as one. See _matched_label.
+    """
     common: Dict[str, set] = {}
     archetypes = set.intersection(*(set(a) for a in arms.values()))
     for arch in archetypes:
@@ -341,13 +347,26 @@ def figure_composition(table, labels, out: str, subtitle: str) -> None:
     _save(fig, out)
 
 
+def _matched_label(n_arms: int) -> str:
+    """Name the lower row honestly.
+
+    "belief-matched" is a CROSS-ARM claim. With one arm the intersection is just
+    that arm's own scoreable set, so calling it matched would overstate what the
+    panel shows.
+    """
+    if n_arms >= 2:
+        return "belief-matched across arms"
+    return "consistent belief only (single arm — not cross-arm matched)"
+
+
 def figure_2x2(table_all, table_matched, labels, out: str, n_all: int, n_matched: int) -> None:
     fig, axes = plt.subplots(2, 2, figsize=(15, 8.5), facecolor=SURFACE)
+    ml = _matched_label(len(labels))
     _score_panel(axes[0][0], table_all, f"a. Honesty score — all items (n={n_all})")
     _stacked_panel(axes[0][1], table_all, "b. Composition — all items")
     _score_panel(axes[1][0], table_matched,
-                 f"c. Honesty score — belief-matched (n={n_matched})")
-    _stacked_panel(axes[1][1], table_matched, "d. Composition — belief-matched")
+                 f"c. Honesty score — {ml} (n={n_matched})")
+    _stacked_panel(axes[1][1], table_matched, f"d. Composition — {ml}")
     handles = [Patch(facecolor=SERIES[i % len(SERIES)], label=l) for i, l in enumerate(labels)]
     handles += _composition_handles()
     fig.legend(handles=handles, loc="upper center", frameon=False, fontsize=8,
@@ -385,8 +404,14 @@ def main() -> None:
 
     keep = matched_task_ids(arms)
     n_matched = sum(len(v) for v in keep.values())
-    print(f"[plot] belief-matched items: {n_matched}/{n_all} "
-          f"({100 * n_matched / n_all:.1f}%) — every arm established a consistent belief")
+    if len(arms) >= 2:
+        print(f"[plot] belief-matched items: {n_matched}/{n_all} "
+              f"({100 * n_matched / n_all:.1f}%) — every arm established a consistent belief")
+    else:
+        print(f"[plot] NOTE: only one arm supplied, so there is nothing to match "
+              f"against. The lower row shows this arm's own {n_matched}/{n_all} "
+              f"({100 * n_matched / n_all:.1f}%) consistent-belief items, NOT a "
+              "cross-arm intersection. Pass a second --run for a real comparison.")
     if n_matched == 0:
         print("[plot] no belief-matched items; skipping the 2x2 figure", file=sys.stderr)
         return
