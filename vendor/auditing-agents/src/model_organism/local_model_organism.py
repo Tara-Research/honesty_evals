@@ -180,19 +180,16 @@ class LocalModelOrganism(ModelOrganism):
             "temperature": kwargs.pop("temperature", self.temperature),
             "top_p": kwargs.pop("top_p", self.top_p),
             "enable_thinking": kwargs.pop("enable_thinking", self.enable_thinking),
+            # None means "use self.lora_name" in __call__; explicit "" means base
+            # (no adapter); any other string is the name of a LoRA already
+            # registered on the honesty_evals server via --lora NAME=PATH.
+            "lora_override": kwargs.pop("model_id_override", None),
         }
 
         if kwargs.pop("sample_user", False):
             raise ValueError(
                 "LocalModelOrganism has enable_sample_user=False; sample_user=True "
                 "is not supported."
-            )
-        if "model_id_override" in kwargs:
-            kwargs.pop("model_id_override")
-            self._warn_once(
-                "model_id_override",
-                f"[{self.name}] LocalModelOrganism ignores model_id_override; "
-                "only one base+LoRA is served per instance.",
             )
         if "intervention" in kwargs:
             kwargs.pop("intervention")
@@ -238,10 +235,17 @@ class LocalModelOrganism(ModelOrganism):
     ) -> str:
         messages = self._to_message_dicts(prompt)
         overrides = self._resolve_overrides(kwargs)
+        lora_override = overrides["lora_override"]
+        if lora_override is None:
+            lora = self.lora_name
+        elif lora_override == "":
+            lora = None  # explicit request for the raw base model
+        else:
+            lora = lora_override
         completions = await self.client.agenerate(
             messages,
             sampling=self.sampling_dict(overrides),
-            lora=self.lora_name,
+            lora=lora,
             enable_thinking=overrides["enable_thinking"],
         )
         return completions[0]
