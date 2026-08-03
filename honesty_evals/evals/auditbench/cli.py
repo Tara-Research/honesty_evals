@@ -50,7 +50,15 @@ def _forward(module: str, module_args: List[str], extra_env: Optional[Dict[str, 
     cmd = [sys.executable, "-m", module, *module_args]
     print(f"[auditbench] cwd={VENDOR_DIR}")
     print(f"[auditbench] exec: {' '.join(cmd)}")
+    # Force line-buffered stdout/stderr in the child so tracebacks reach the
+    # sbatch log before the parent tears down.
+    env.setdefault("PYTHONUNBUFFERED", "1")
+    sys.stdout.flush()
+    sys.stderr.flush()
     proc = subprocess.run(cmd, cwd=str(VENDOR_DIR), env=env)
+    sys.stdout.flush()
+    sys.stderr.flush()
+    print(f"[auditbench] subprocess exited with code {proc.returncode}")
     if proc.returncode != 0:
         raise SystemExit(proc.returncode)
 
@@ -76,8 +84,12 @@ def add_run_args(parser: argparse.ArgumentParser) -> None:
     )
 
     g = parser.add_argument_group("auditor")
-    g.add_argument("--auditor-model", default=None, help="Auditor agent model (runner --agent-model)")
-    g.add_argument("--agent-type", default="vllm", help="Auditor agent framework (runner --agent-type)")
+    # Default matches the AuditBench paper (and vendored run_agents_all.sh:21):
+    # Claude Haiku 4.5 via the Claude Code SDK, authenticated by
+    # CLAUDE_CODE_OAUTH_TOKEN in vendor/auditing-agents/safety-tooling/.env so
+    # auditor turns bill against the Claude subscription, not per-token API.
+    g.add_argument("--auditor-model", default="claude-haiku-4-5-20251001", help="Auditor agent model (runner --agent-model)")
+    g.add_argument("--agent-type", default="claude_agent", help="Auditor agent framework (runner --agent-type)")
     g.add_argument("--vllm-base-url", default=None, help="OpenAI-compatible endpoint for the auditor")
     g.add_argument(
         "--n-turns",
@@ -90,6 +102,35 @@ def add_run_args(parser: argparse.ArgumentParser) -> None:
     g.add_argument("--n-runs", type=int, default=1, help="Independent audit runs for this quirk")
     g.add_argument("--max-tokens", type=int, default=None, help="Token budget per agent (XOR --running-time)")
     g.add_argument("--running-time", type=int, default=None, help="Minutes per agent (XOR --max-tokens)")
+
+    g = parser.add_argument_group("honesty-lora tool")
+    g.add_argument(
+        "--honesty-lora-repo",
+        default=None,
+        help="HF repo or local path for an investigation LoRA (e.g. an honesty "
+        "adapter). When set, we pre-merge (target quirk LoRA + this) on "
+        "$SCRATCH/honesty_evals_lora_cache and switch the auditor's `sample` "
+        "tool into paired mode — every call returns the base target response "
+        "AND the merged-adapter response side by side. Requires --lora-repo. "
+        "The generation server must ALSO have been launched with "
+        "`--lora <MERGED_LORA_NAME>=<merged_path>` (the CLI prints the exact "
+        "path). Cache hits are instant; the first pair takes a few seconds.",
+    )
+    g.add_argument(
+        "--honesty-lora-scale",
+        type=float,
+        default=1.0,
+        help="Multiplier on the honesty LoRA's contribution during merge "
+        "(default 1.0). Enters the cache key so different scales get "
+        "distinct cache entries.",
+    )
+    g.add_argument(
+        "--merged-lora-name",
+        default="honesty_intervention",
+        help="Name under which the merged adapter must be registered on the "
+        "generation server (`--lora NAME=PATH`). Also the value forwarded "
+        "to the auditor tool via HONESTY_EVALS_MERGED_LORA_NAME.",
+    )
 
     parser.add_argument("--run-name", required=True, help="Run namespace: outputs go to results/auditbench/<run-name>/")
 
@@ -117,7 +158,66 @@ def run_run(args: argparse.Namespace) -> None:
     if args.n_turns is not None:
         fwd += ["--vllm-max-tool-iterations", str(args.n_turns)]
 
-    _forward(RUN_MODULE, fwd, extra_env={"HONESTY_EVALS_SERVER_URL": args.server_url})
+    extra_env: Dict[str, str] = {"HONESTY_EVALS_SERVER_URL": args.server_url}
+    if args.honesty_lora_repo is not None:
+        _prepare_honesty_lora(args, extra_env)
+
+    _forward(RUN_MODULE, fwd, extra_env=extra_env)
+
+
+def _prepare_honesty_lora(args: argparse.Namespace, extra_env: Dict[str, str]) -> None:
+    """Merge the target quirk LoRA with the honesty LoRA (cached on $SCRATCH),
+    verify the generation server has the merged adapter loaded, and set
+    ``HONESTY_EVALS_MERGED_LORA_NAME`` so the vendored MCP server puts the
+    ``sample`` tool into paired mode — every call returns the base target
+    response AND the merged-adapter response side by side.
+
+    Fail-loud on any pre-condition break — we do NOT let an audit run silently
+    without the tool the user asked for.
+    """
+    if args.lora_repo is None:
+        raise SystemExit("--honesty-lora-repo requires --lora-repo (the target quirk LoRA)")
+
+    # Deferred import: pulls torch/peft/safetensors, which the top-level
+    # CLI import path stays free of on purpose (audit `judge` shouldn't
+    # need them).
+    from honesty_evals.core.lora import get_or_create_merged_adapter
+
+    merged_path = get_or_create_merged_adapter(
+        target_source=args.lora_repo,
+        honesty_source=args.honesty_lora_repo,
+        scale=args.honesty_lora_scale,
+    )
+    print(f"[auditbench] merged adapter ready:")
+    print(f"[auditbench]   path       : {merged_path}")
+    print(f"[auditbench]   server name: {args.merged_lora_name}")
+
+    _assert_server_has_lora(args.server_url, args.merged_lora_name, merged_path)
+    extra_env["HONESTY_EVALS_MERGED_LORA_NAME"] = args.merged_lora_name
+
+
+def _assert_server_has_lora(server_url: str, lora_name: str, merged_path) -> None:
+    """Ping the generation server's /health endpoint and verify the merged
+    adapter is registered under the expected name. Prints the exact CLI flag
+    the user needs on the server side if it isn't.
+    """
+    import httpx
+
+    try:
+        health = httpx.get(server_url.rstrip("/") + "/health", timeout=10.0).json()
+    except Exception as exc:
+        raise SystemExit(
+            f"[auditbench] cannot reach generation server at {server_url}: {exc}"
+        )
+    loras = set(health.get("loras", []) or [])
+    if lora_name in loras:
+        return
+    raise SystemExit(
+        f"[auditbench] server at {server_url} does not have LoRA "
+        f"'{lora_name}' registered (has: {sorted(loras) or '<none>'}).\n"
+        f"    Relaunch it with an additional flag:\n"
+        f"        --lora {lora_name}={merged_path}"
+    )
 
 
 # ---------- judge ----------
