@@ -10,7 +10,6 @@ dependencies = [
     # PyPI elsewhere. Has qwen3_5 (first in 0.17.0), so Qwen3.6-27B serves.
     # vLLM has no Windows wheels; the CLI imports it lazily, so a Windows dev
     # box can still `pip install -e .` and run the CPU-only stages.
-    "vllm==0.25.0; sys_platform != 'win32'",
     "torch",
     "transformers",
     "pyyaml",
@@ -30,6 +29,15 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+serve = [
+    "vllm==0.25.0; sys_platform != 'win32'",
+]
+impossible-swebench = [
+    "impossiblebench @ git+https://github.com/safety-research/impossiblebench@061dc3dce6a96ab6cf02a855157263033dcfa3ba",
+    "inspect-evals>=0.15.0",
+    "inspect-podman==0.1.2",
+    "podman-compose==1.6.0",
+]
 dev = [
     "pytest",
 ]
@@ -46,3 +54,4 @@ include = ["honesty_evals*"]
 
 [tool.setuptools.package-data]
 "honesty_evals.core.judge" = ["prompts/*.yaml"]
+"honesty_evals.evals.impossible_swebench" = ["tasks/*.yml"]

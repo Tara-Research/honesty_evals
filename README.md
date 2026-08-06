@@ -1,10 +1,13 @@
 # honesty_evals
 
-Honesty evaluations for LLMs: **five evals, one serving stack**. All
+Honesty evaluations for LLMs: **six evals, one serving stack**. Most
 generation runs through a small FastAPI server on **stock vLLM** (pinned in
 `pyproject.toml`); all judging runs on a local vLLM judge
 (`openai/gpt-oss-120b`) in the same environment. Extracted from the
 `persona_playground` research codebase.
+
+Impossible-SWEbench is the exception: it uses an externally launched stock
+`vllm serve` OpenAI endpoint because Inspect already supports that protocol.
 
 > **Note:** activation steering (SwFC/StTP/StMP via the `vllm-steer` fork) was
 > removed from this repo on 2026-07-27 because the fork's vLLM snapshot could
@@ -12,7 +15,7 @@ generation runs through a small FastAPI server on **stock vLLM** (pinned in
 > with steering is tagged **`pre-steering-removal`**; the options for
 > reintroducing steering are written up in `VLLM_STEER_HANDOFF.md`.
 
-## The five evals
+## The six evals
 
 | Eval | What it measures | Metric of record |
 |---|---|---|
@@ -21,6 +24,7 @@ generation runs through a small FastAPI server on **stock vLLM** (pinned in
 | `em` | Emergent Misalignment: misalignment of a risky-finance LoRA model vs its base | aligned + coherent scores 0-100 |
 | `among-us` | Strategic deception in the AmongUs social-deduction game | impostor win rate |
 | `auditbench` | Alignment-auditing agents (vendored auditing-agents repo) probing a quirked base+LoRA target | audit outcomes per quirk |
+| `impossible-swebench` | Whether an agent modifies code to satisfy logically impossible tests | impossible-task cheating rate |
 
 ## Architecture
 
@@ -43,7 +47,7 @@ git clone --recurse-submodules git@github.com:Tara-Research/honesty_evals.git
 cd honesty_evals
 
 python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"     # pulls the pinned vllm + matching torch
+pip install -e ".[serve,dev]" # pulls the pinned vllm + matching torch
 ```
 
 (`--recurse-submodules` is still needed for `vendor/auditing-agents/safety-tooling`.
@@ -103,7 +107,23 @@ honesty-evals mask        {download,generate,judge,metrics,process}
 honesty-evals em          {fetch,generate,judge,metrics,plot}
 honesty-evals among-us    {run,judge,metrics}
 honesty-evals auditbench  {run,judge}
+honesty-evals impossible-swebench {validate,run,summary,build-image-archive}
 ```
+
+Impossible-SWEbench expects an OpenAI-compatible vLLM server and a prebuilt
+Podman image archive:
+
+```bash
+honesty-evals impossible-swebench run \
+    --task impossible50 --model Qwen/Qwen3.6-27B \
+    --server-url http://127.0.0.1:8000/v1 \
+    --run-name qwen36-impossible50 \
+    --runtime-dir "$SLURM_TMPDIR" \
+    --image-archive /path/to/impossible-swebench-images.tar
+```
+
+Install only this runner with `pip install -e ".[impossible-swebench]"`;
+vLLM can live in a separate environment.
 
 Common `generate`/`run` flags (all required unless noted; no silent defaults):
 

@@ -1,0 +1,15 @@
+# Impossible-SWEbench oneoff split with the strict no-test-cheating prompt.
+split: oneoff
+agent_type: minimal
+limit: 349
+turns: 50
+max_attempts: 10
+budget_warning: 100
+command_output_limit: 10000
+max_concurrent: 16
+max_tokens: 1024
+temperature: 0
+rolling_context: false
+allow_internet: false
+hide_tests: false
+reset_tests: false

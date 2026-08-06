@@ -3,7 +3,7 @@
     honesty-evals serve      --model ... --tp ... --port ...
     honesty-evals <eval> <stage> [flags]
 
-Evals: generalized, mask, em, among-us, auditbench.
+Evals: generalized, mask, em, among-us, auditbench, impossible-swebench.
 Each eval package contributes its subcommand tree via register_cli().
 """
 from __future__ import annotations
@@ -33,12 +33,16 @@ def build_parser() -> argparse.ArgumentParser:
     from honesty_evals.evals.emergent_misalignment.cli import register_cli as register_em
     from honesty_evals.evals.generalized.cli import register_cli as register_generalized
     from honesty_evals.evals.mask.cli import register_cli as register_mask
+    from honesty_evals.evals.impossible_swebench.cli import (
+        register_cli as register_impossible_swebench,
+    )
 
     register_generalized(subparsers)
     register_mask(subparsers)
     register_em(subparsers)
     register_among_us(subparsers)
     register_auditbench(subparsers)
+    register_impossible_swebench(subparsers)
 
     return parser
 
