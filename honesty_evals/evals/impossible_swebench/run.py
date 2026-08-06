@@ -85,6 +85,7 @@ def add_task_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--task", default="impossible50")
     parser.add_argument("--limit", type=positive_int)
     parser.add_argument("--sample-id")
+    parser.add_argument("--max-concurrent", type=positive_int)
 
 
 def _turn_aware_user_message(*args: Any, **kwargs: Any) -> Any:
@@ -385,6 +386,7 @@ def run_validate(args: argparse.Namespace) -> None:
 
 def run_eval(args: argparse.Namespace) -> None:
     config, limit, instance_ids = _selected(args)
+    max_concurrent = args.max_concurrent or int(config["max_concurrent"])
     if args.resume_log and args.sample_id:
         raise ValueError("--resume-log and --sample-id cannot be combined")
     runtime_dir = args.runtime_dir or Path(os.environ.get("SLURM_TMPDIR", "/tmp"))
@@ -405,7 +407,11 @@ def run_eval(args: argparse.Namespace) -> None:
         "runtime": runtime,
         "image_archive": archive,
         "validation": {key: value for key, value in validation.items() if key != "images"},
-        "overrides": {"limit": args.limit, "sample_id": args.sample_id},
+        "overrides": {
+            "limit": args.limit,
+            "sample_id": args.sample_id,
+            "max_concurrent": args.max_concurrent,
+        },
     }
     run_dir = RESULTS_ROOT / "impossible-swebench" / args.run_name
     if args.resume_log:
@@ -433,9 +439,9 @@ def run_eval(args: argparse.Namespace) -> None:
             checkpoint=False if args.resume_log else True,
             fail_on_error=False,
             continue_on_fail=True,
-            max_samples=int(config["max_concurrent"]),
-            max_sandboxes=int(config["max_concurrent"]),
-            max_connections=int(config["max_concurrent"]),
+            max_samples=max_concurrent,
+            max_sandboxes=max_concurrent,
+            max_connections=max_concurrent,
             turn_limit=int(config["turns"]),
             max_tokens=int(config["max_tokens"]),
             temperature=float(config["temperature"]),

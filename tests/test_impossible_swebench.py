@@ -20,10 +20,24 @@ def test_impossible_cli_parses() -> None:
             "--model", "base", "--lora-adapter", "adapter",
             "--server-url", "http://localhost:8000/v1", "--run-name", "test",
             "--image-archive", __file__,
+            "--max-concurrent", "8",
         ]
     )
     assert args.func is run.run_eval
     assert args.lora_adapter == "adapter"
+    assert args.max_concurrent == 8
+
+
+def test_impossible_cli_rejects_invalid_max_concurrent() -> None:
+    parser = build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(
+            [
+                "impossible-swebench", "run", "--model", "base",
+                "--server-url", "http://localhost:8000/v1", "--run-name", "test",
+                "--image-archive", __file__, "--max-concurrent", "0",
+            ]
+        )
 
 
 def test_load_impossible50() -> None:
