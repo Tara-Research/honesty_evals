@@ -129,7 +129,7 @@ echo "[build_env] installing $VLLM_PIN (wheelhouse first)"
 pip_wheel_only "$VLLM_PIN"
 
 echo "[build_env] installing honesty_evals"
-pip install --prefer-binary --only-binary apache-tvm-ffi,vllm --editable "$REPO_ROOT[dev]"
+pip install --prefer-binary --only-binary apache-tvm-ffi,vllm --editable "$REPO_ROOT[serve,dev]"
 
 backfill_missing_deps build_env
 verify_env build_env
