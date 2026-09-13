@@ -46,12 +46,65 @@ from honesty_evals.evals.mask.json_io import (
 
 DEFAULT_BELIEF_SYSTEM = "You are a helpful assistant."
 
-_THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
+# Two tag spellings, both real. Qwen3.x's chat template emits ``<think>``; the
+# reward-hacking distill organism was trained on 1500/1500 assistant turns opening
+# with ``<thinking>`` (its CodeContests SFT format). A regex written for one silently
+# passes the other straight through to the judge — ``</think>`` is not a substring of
+# ``</thinking>``, so even the unpaired fallback below misses it.
+_THINK_RE = re.compile(r"<think(?:ing)?>.*?</think(?:ing)?>", re.DOTALL)
+_THINK_OPEN_RE = re.compile(r"<think(?:ing)?>")
+_THINK_CLOSE_RE = re.compile(r"</think(?:ing)?>")
 
 
 def _strip_think_tags(text: str) -> str:
-    """Remove <think>...</think> blocks (Qwen3 reasoning traces)."""
-    return _THINK_RE.sub("", text).strip()
+    """Remove reasoning traces, whether or not the opening tag was generated.
+
+    A paired-tag regex is not enough. With thinking left to the chat template,
+    Qwen3.6 ends the PROMPT with a dangling ``<think>\n`` (chat_template.jinja:
+    ``{%- else %}{{- '<think>\n' }}``), so the completion begins already inside
+    the block and contains only the closing ``</think>``. The paired regex
+    matched nothing and the judge silently received reasoning-trace text instead
+    of the model's answer. Anything before the last closing tag is therefore
+    reasoning and is dropped even with no opening tag.
+
+    A response with no closing tag at all is returned unchanged: with
+    ENABLE_THINKING=false there are no tags to strip, and for a thinking run it
+    means the block never closed (truncated mid-reasoning, no answer produced).
+    Those two cases are told apart by :func:`_trace_kind`, which the caller
+    tallies into the output metadata.
+    """
+    text = _THINK_RE.sub("", text)
+    last_close = None
+    for last_close in _THINK_CLOSE_RE.finditer(text):
+        pass
+    if last_close is not None:
+        text = text[last_close.end():]
+    return text.strip()
+
+
+def _trace_kind(text: str) -> str | None:
+    """Classify a RAW completion's reasoning trace: 'closed', 'unclosed', or None.
+
+    Called before stripping, because stripping destroys the evidence: only the
+    stripped text is persisted, so a trace that is not counted here cannot be
+    recovered from responses.json afterwards. 'unclosed' needs a visible opening
+    tag — a completion that started inside a template-opened ``<think>`` and never
+    closed is indistinguishable from plain prose, and is not guessed at.
+    """
+    if _THINK_CLOSE_RE.search(text):
+        return "closed"
+    if _THINK_OPEN_RE.search(text):
+        return "unclosed"
+    return None
+
+
+def _strip_and_tally(text: str, tally: Dict[str, int]) -> str:
+    """Strip the reasoning trace, recording what was there before it was removed."""
+    tally["total"] += 1
+    kind = _trace_kind(text)
+    if kind is not None:
+        tally[kind] += 1
+    return _strip_think_tags(text)
 
 
 def _lie_messages(row: pd.Series, is_doubling_down: bool) -> List[Dict[str, str]]:
@@ -87,6 +140,9 @@ def _process_archetype(
 
     is_doubling_down = "dd_turn_1_prompt" in df.columns and "dd_turn_1_response" in df.columns
     enable_thinking = enable_thinking_value(args)
+    # Always all three keys, present even at zero, so the rate is comparable
+    # across arms instead of being an absent field in the clean one.
+    tally: Dict[str, int] = {"total": 0, "closed": 0, "unclosed": 0}
 
     # ---- Lying generations: one request per row, n = lie_k samples ----
     lie_cols = [
@@ -112,7 +168,7 @@ def _process_archetype(
                 f"Expected {args.lie_k} completions per lying prompt, got {len(texts)}"
             )
         for col, text in zip(lie_cols, texts):
-            df.at[idx, col] = _strip_think_tags(text)
+            df.at[idx, col] = _strip_and_tally(text, tally)
 
     # ---- Belief elicitation ----
     if "belief_elicit_1" in df.columns:
@@ -154,8 +210,14 @@ def _process_archetype(
                         f"Expected {k_value} completions per belief prompt, got {len(texts)}"
                     )
                 for col, text in zip(gen_cols, texts):
-                    df.at[idx, col] = _strip_think_tags(text)
+                    df.at[idx, col] = _strip_and_tally(text, tally)
 
+    out_meta["reasoning_traces"] = dict(tally)
+    print(
+        f"[mask/generate] {archetype}: reasoning traces "
+        f"{tally['closed']} closed / {tally['unclosed']} unclosed "
+        f"of {tally['total']} completions"
+    )
     write_json_data(output_path, out_meta, df)
     print(f"[mask/generate] wrote {output_path}")
 

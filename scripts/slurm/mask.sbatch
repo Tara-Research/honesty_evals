@@ -10,7 +10,23 @@
 # Optional: TP (default 4), LIE_K (default 1), TEST (set to any value for the 5-row subset),
 #   LORA_ADAPTER (LoRA served on top of MODEL; on tamia use a pre-downloaded
 #   LOCAL PATH — compute nodes have no internet),
-#   STAGES (comma-separated subset of generate,judge,metrics,process; default all)
+#   STAGES (comma-separated subset of generate,judge,metrics,process; default all),
+#   HONESTY_EVALS_RESULTS (results root; default <repo>/results — point it at
+#     scratch when /home is near its quota),
+#   MAX_NEW_TOKENS (default 1024),
+#   ENABLE_THINKING (true|false|default; default 'default' = leave it to the chat
+#     template)
+#
+# ENABLE_THINKING=false is the one you almost always want on Qwen3.x. Left at
+# 'default', Qwen3.6's template ends the prompt with a dangling '<think>\n', so
+# the completion STARTS inside the reasoning block and carries only the closing
+# '</think>'. Two things follow: generate.py's <think>...</think> strip cannot
+# match (it needs both tags) so the judge is handed the raw reasoning trace, and
+# most responses burn MAX_NEW_TOKENS before they ever close the block, leaving no
+# final statement to score at all (measured on job 419357: only 3% of
+# 'continuations' pressure prompts closed it). ENABLE_THINKING=false makes the
+# template emit a pre-closed empty block instead, so the model answers directly
+# and the completion contains no tags.
 #
 # STAGES lets you resume without regenerating: generation is by far the most
 # expensive stage and its output (<run-dir>/<archetype>/responses/) is already on
@@ -29,6 +45,8 @@ profile_activate
 TP="${TP:-4}"
 LIE_K="${LIE_K:-1}"
 STAGES="${STAGES:-generate,judge,metrics,process}"
+MAX_NEW_TOKENS="${MAX_NEW_TOKENS:-1024}"
+ENABLE_THINKING="${ENABLE_THINKING:-default}"
 
 ALL_STAGES="generate judge metrics process"
 for s in ${STAGES//,/ }; do
@@ -39,8 +57,12 @@ for s in ${STAGES//,/ }; do
 done
 has_stage() { case ",$STAGES," in *",$1,"*) return 0 ;; *) return 1 ;; esac; }
 
-RUN_DIR="results/mask/$RUN_NAME"
-echo "stages: $STAGES"
+# Must track honesty_evals.core.paths.RESULTS_ROOT, which the generate stage
+# honours via $HONESTY_EVALS_RESULTS. Hardcoding "results/" here pointed the
+# judge/metrics/process stages at a directory generate had never written to
+# whenever results lived off /home.
+RUN_DIR="${HONESTY_EVALS_RESULTS:-results}/mask/$RUN_NAME"
+echo "stages: $STAGES  max_new_tokens: $MAX_NEW_TOKENS  enable_thinking: $ENABLE_THINKING"
 
 if has_stage generate; then
     echo "[1/4] generate"
@@ -52,7 +74,8 @@ if has_stage generate; then
         ${TEST:+--test} \
         ${LORA_ADAPTER:+--lora-adapter "$LORA_ADAPTER"} \
         --launch-server --tp "$TP" --port 8192 \
-        --max-new-tokens 1024 --temperature 1.0 --top-p 1.0 --seed 42
+        --max-new-tokens "$MAX_NEW_TOKENS" --temperature 1.0 --top-p 1.0 \
+        --enable-thinking "$ENABLE_THINKING" --seed 42
 else
     echo "[1/4] generate SKIPPED — reusing responses in $RUN_DIR"
     if [ ! -d "$RUN_DIR" ]; then

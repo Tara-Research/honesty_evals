@@ -55,20 +55,29 @@ from matplotlib.patches import Patch
 from honesty_evals.evals.mask.process_metrics import _bootstrap_ci, _honesty_score_fn
 
 # ── Design tokens ────────────────────────────────────────────────────────────
-# Categorical slots 1-3 of the validated reference palette, in their documented
-# order. Slots 1-2 pass every adjacent gate and slots 1-3 pass all-pairs in both
-# modes; re-validate with the dataviz validator before substituting hues.
-SERIES = ["#2a78d6", "#eb6834"]
-# The composition fills must NOT reuse the arm hues: in a single 2x2 figure a
-# shared hue would mean "arm" in one panel and "outcome" in the next. Aqua and
-# violet are disjoint from blue/orange and the four together clear all-pairs
-# (worst normal-vision ΔE 16.3, worst CVD 9.2). "Unknown" deliberately carries no
-# hue at all — a fifth hue cannot clear the floors alongside these four, and
-# absence-of-information reads correctly as an unfilled, hatched segment.
+SERIES = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4"]
+# Arms take categorical slots 1-5. Slots 1-3 are unchanged from the three-arm
+# palette (which clears all-pairs in both modes), so three-arm figures render
+# byte-identically; slots 4-5 (yellow, magenta) extend it for four- and five-arm
+# comparisons. Grouped bars only ever put ADJACENT slots side by side, and the
+# five-slot order clears the adjacent gates in light mode: worst adjacent CVD
+# dE 9.1 (yellow<->aqua, protan) against the >=8 target, worst adjacent
+# normal-vision dE 19.6 (magenta<->yellow) against the >=15 floor. Aqua, yellow
+# and magenta each sit under 3:1 contrast on the light surface, so the relief
+# rule applies -- every bar and segment here carries a visible direct label,
+# which satisfies it. Do not grow this list past five without re-running the
+# validator: the all-pairs gates are weaker than the adjacent ones, and
+# yellow+orange in particular fail them.
+#
+# Composition keeps its own hues: aqua = honest, violet = dishonest, hatched =
+# unknown. NOTE the aqua overlap with arm 3 — with three arms there is no fifth
+# hue that clears the CVD floors against the arm orange (measured: red 7.1,
+# magenta 12.9, green 3.2), so aqua does double duty as "arm 3" in the score
+# panels and "honest" in the composition panels. The two vocabularies live in
+# separate columns and every segment is directly labelled, so the panels stay
+# readable; just do not read a colour match ACROSS columns as meaningful.
 C_HONEST, C_LIE = "#1baf7a", "#4a3aa7"
 C_UNKNOWN_FILL, C_UNKNOWN_HATCH = "#ffffff", "#898781"
-# Aqua sits below 3:1 on the light surface, so the relief rule applies: every
-# segment large enough carries a visible percentage label (see _stacked_panel).
 
 SURFACE = "#fcfcfb"
 INK = "#0b0b0b"
@@ -289,16 +298,35 @@ def _stacked_panel(ax, table: Dict[str, Dict[str, Dict]], title: str) -> None:
                     ax.text(p, acc + v / 2, f"{v:.0f}", ha="center", va="center",
                             fontsize=6.5, color=ink, zorder=5)
                 acc += 0 if np.isnan(v) else v
-        # Arm name ABOVE each bar, horizontal: rotated labels below the axis
-        # collided with the archetype tick labels.
+        # Arm INDEX above each bar, keyed to the numbered legend. Full names
+        # here collided from four arms up (a bar is group_w/n_arms wide, which
+        # at five arms is narrower than "wv advsys c4" renders); rotating them
+        # upright instead would need ~30% of the panel's height as headroom and
+        # squash the stacked segments. A digit always fits, and the legend
+        # carries the mapping.
         for p in pos:
-            ax.text(p, 101.5, label, ha="center", va="bottom", fontsize=6,
+            ax.text(p, 101.5, str(i + 1), ha="center", va="bottom", fontsize=6.5,
                     color=INK_MUTED)
 
     ax.set_xticks(x)
     ax.set_xticklabels([PRETTY.get(c, c) for c in cats], fontsize=8, color=INK_SECONDARY)
     _style_axes(ax, "% of items")
     ax.set_title(title, fontsize=10, color=INK, pad=8, loc="left")
+
+
+def _arm_handles(labels: List[str], swatch: bool = True) -> List[Patch]:
+    """Arm entries, numbered to match the index printed above each stacked bar.
+
+    swatch=False drops the colour chip: in the composition-only figure the bars
+    are coloured by honest/dishonest/unknown, never by arm, so a coloured chip
+    there would point at a hue that appears nowhere in the plot. The number is
+    the only arm cue, so the legend is number -> name text.
+    """
+    return [
+        Patch(facecolor=SERIES[i % len(SERIES)] if swatch else "none",
+              edgecolor="none", label=f"{i + 1} {l}")
+        for i, l in enumerate(labels)
+    ]
 
 
 def _composition_handles() -> List[Patch]:
@@ -311,13 +339,11 @@ def _composition_handles() -> List[Patch]:
 
 
 def _legend(fig, labels: List[str], composition: bool) -> None:
+    # The composition figure needs the arm swatches too: its bars are labelled
+    # with bare indices, so without them the digits map to nothing.
+    handles = _arm_handles(labels, swatch=not composition)
     if composition:
-        handles = _composition_handles()
-    else:
-        handles = [
-            Patch(facecolor=SERIES[i % len(SERIES)], label=l)
-            for i, l in enumerate(labels)
-        ]
+        handles += _composition_handles()
     fig.legend(
         handles=handles, loc="upper right", frameon=False, fontsize=8,
         labelcolor=INK_SECONDARY, ncol=len(handles),
@@ -367,8 +393,7 @@ def figure_2x2(table_all, table_matched, labels, out: str, n_all: int, n_matched
     _score_panel(axes[1][0], table_matched,
                  f"c. Honesty score — {ml} (n={n_matched})")
     _stacked_panel(axes[1][1], table_matched, f"d. Composition — {ml}")
-    handles = [Patch(facecolor=SERIES[i % len(SERIES)], label=l) for i, l in enumerate(labels)]
-    handles += _composition_handles()
+    handles = _arm_handles(labels) + _composition_handles()
     fig.legend(handles=handles, loc="upper center", frameon=False, fontsize=8,
                labelcolor=INK_SECONDARY, ncol=len(handles), bbox_to_anchor=(0.5, 1.02))
     fig.tight_layout(rect=(0, 0, 1, 0.97))

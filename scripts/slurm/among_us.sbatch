@@ -20,7 +20,9 @@
 #   TEMPERATURE (default 1.0), TOP_P (default 1.0),
 #   LORA_ADAPTER (LoRA applied to LORA_ROLES only; on tamia use a pre-downloaded
 #   LOCAL PATH — compute nodes have no internet),
-#   LORA_ROLES (comma-separated, default Impostor when LORA_ADAPTER is set)
+#   LORA_ROLES (comma-separated, default Impostor when LORA_ADAPTER is set),
+#   HONESTY_EVALS_RESULTS (results root; default <repo>/results — point it at
+#     scratch when /home is near its quota)
 set -euo pipefail
 cd "$SLURM_SUBMIT_DIR"
 mkdir -p logs
@@ -59,7 +61,10 @@ honesty-evals among-us run \
     --top-p "$TOP_P" --enable-thinking "$ENABLE_THINKING" --seed 42
 fi
 
-RUN_DIR="results/among_us/$RUN_NAME"
+# Must track honesty_evals.core.paths.RESULTS_ROOT, which the run stage honours
+# via $HONESTY_EVALS_RESULTS. Hardcoding "results/" here sent the judge at a
+# directory the run stage had never written to whenever results lived off /home.
+RUN_DIR="${HONESTY_EVALS_RESULTS:-results}/among_us/$RUN_NAME"
 
 if has_stage judge; then
     echo "[2/3] judge"
