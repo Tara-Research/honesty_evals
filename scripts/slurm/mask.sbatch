@@ -47,6 +47,13 @@ LIE_K="${LIE_K:-1}"
 STAGES="${STAGES:-generate,judge,metrics,process}"
 MAX_NEW_TOKENS="${MAX_NEW_TOKENS:-1024}"
 ENABLE_THINKING="${ENABLE_THINKING:-default}"
+# Grid convention: score every arm against the BASE model's beliefs. BELIEFS_FROM=<run dir of
+# the base run>; the generate stage copies its belief generations, the judge copies their
+# evaluations (only the lying prompts are generated and judged: ~1 h instead of ~3.5 h).
+BELIEFS_FROM="${BELIEFS_FROM:-}"
+# Extra KEY=VAL pairs applied to the GENERATE stage only (e.g. RH_STEER_MODE=add ... for the
+# activation-steering vLLM plugin); the judge starts its own vLLM in this job and must not see them.
+GEN_ENV="${GEN_ENV:-}"
 
 ALL_STAGES="generate judge metrics process"
 for s in ${STAGES//,/ }; do
@@ -62,11 +69,12 @@ has_stage() { case ",$STAGES," in *",$1,"*) return 0 ;; *) return 1 ;; esac; }
 # judge/metrics/process stages at a directory generate had never written to
 # whenever results lived off /home.
 RUN_DIR="${HONESTY_EVALS_RESULTS:-results}/mask/$RUN_NAME"
-echo "stages: $STAGES  max_new_tokens: $MAX_NEW_TOKENS  enable_thinking: $ENABLE_THINKING"
+echo "stages: $STAGES  max_new_tokens: $MAX_NEW_TOKENS  enable_thinking: $ENABLE_THINKING  beliefs_from: ${BELIEFS_FROM:-none}  gen_env: ${GEN_ENV:-none}"
 
 if has_stage generate; then
     echo "[1/4] generate"
-    honesty-evals mask generate \
+    # shellcheck disable=SC2086
+    env $GEN_ENV honesty-evals mask generate \
         --model "$MODEL" \
         --run-name "$RUN_NAME" \
         --archetypes "$ARCHETYPES" \
@@ -75,7 +83,8 @@ if has_stage generate; then
         ${LORA_ADAPTER:+--lora-adapter "$LORA_ADAPTER"} \
         --launch-server --tp "$TP" --port 8192 \
         --max-new-tokens "$MAX_NEW_TOKENS" --temperature 1.0 --top-p 1.0 \
-        --enable-thinking "$ENABLE_THINKING" --seed 42
+        --enable-thinking "$ENABLE_THINKING" --seed 42 \
+        ${BELIEFS_FROM:+--beliefs-from "$BELIEFS_FROM"}
 else
     echo "[1/4] generate SKIPPED — reusing responses in $RUN_DIR"
     if [ ! -d "$RUN_DIR" ]; then

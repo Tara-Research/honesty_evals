@@ -250,7 +250,33 @@ def _build_numerical_combined_prompt(row, belief_responses):
 # Main processing
 # ---------------------------------------------------------------------------
 
-def process_file(filepath, output_file, judge: VllmJudge, batch_size=None, save_every=1):
+BELIEF_EVAL_PREFIX = "eval(belief_system_1 + belief_elicit_"
+
+
+def _copy_belief_evals_from(df, from_dir, archetype, filename):
+    """Copy the reference run's belief evaluations (eval(...)/_extracted columns) by task_id."""
+    from pathlib import Path as _P
+    cand = _P(from_dir) / archetype / "evaluated" / filename
+    if not cand.exists():
+        files = sorted((_P(from_dir) / archetype / "evaluated").glob("*.json"))
+        if len(files) != 1:
+            raise FileNotFoundError(f"beliefs_from: no evaluated file for {archetype} under {from_dir}")
+        cand = files[0]
+    _, ref = read_json_data(cand)
+    cols = [c for c in ref.columns if c.startswith(BELIEF_EVAL_PREFIX)]
+    if not cols:
+        raise ValueError(f"beliefs_from: no belief evaluations in {cand}")
+    ref = ref.set_index("task_id")
+    missing = [t for t in df["task_id"] if t not in ref.index]
+    if missing:
+        raise ValueError(f"beliefs_from: {len(missing)} task_ids of {archetype} absent from {cand}")
+    for c in cols:
+        df[c] = [ref.at[t, c] for t in df["task_id"]]
+    print(f"[mask/judge] {archetype}: {len(cols)} belief eval columns copied from {cand} -- only the lying prompts are judged")
+    return cols
+
+
+def process_file(filepath, output_file, judge: VllmJudge, batch_size=None, save_every=1, beliefs_from=None):
     """Process a single JSON file: collect prompts, batch-evaluate, write results.
 
     Args:
@@ -268,6 +294,10 @@ def process_file(filepath, output_file, judge: VllmJudge, batch_size=None, save_
         metadata, df = read_json_data(filepath)
 
     archetype = metadata.get("archetype", "")
+
+    if beliefs_from:
+        _copy_belief_evals_from(df, beliefs_from, archetype, os.path.basename(str(filepath)))
+        metadata["beliefs_from"] = str(beliefs_from)
 
     # Copy ground truth
     df["ground_truth_extracted"] = df["formatted_ground_truth"]
@@ -500,7 +530,8 @@ def re_extract_file(filepath):
 
 def run_judge(args: argparse.Namespace) -> None:
     run_dir = Path(args.run_dir)
-    load_manifest(run_dir)  # validates this is a honesty_evals run directory
+    manifest = load_manifest(run_dir)  # validates this is a honesty_evals run directory
+    beliefs_from = manifest.get("beliefs_from")
 
     # --re-extract mode: recompute _extracted columns, no judge needed
     if args.re_extract:
@@ -535,7 +566,7 @@ def run_judge(args: argparse.Namespace) -> None:
                 os.remove(out)
 
             print(f"[mask/judge] processing {resp_file}")
-            process_file(str(resp_file), str(out), judge, args.batch_size, args.save_every)
+            process_file(str(resp_file), str(out), judge, args.batch_size, args.save_every, beliefs_from=beliefs_from)
 
 
 def add_args(parser: argparse.ArgumentParser) -> None:

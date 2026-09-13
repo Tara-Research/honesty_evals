@@ -121,6 +121,40 @@ def _lie_messages(row: pd.Series, is_doubling_down: bool) -> List[Dict[str, str]
     ]
 
 
+BELIEF_GEN_PREFIX = "generation(belief_system_1 + belief_elicit_"
+
+
+def _reference_file(from_dir: Path, archetype: str, stage: str) -> Path:
+    files = sorted((from_dir / archetype / stage).glob("*.json"))
+    if len(files) != 1:
+        raise FileNotFoundError(
+            f"--beliefs-from: expected exactly one {stage} file for {archetype} under {from_dir}, "
+            f"found {len(files)}"
+        )
+    return files[0]
+
+
+def _copy_beliefs_from(df: pd.DataFrame, from_dir: Path, archetype: str) -> None:
+    """Fill this run's belief-generation columns from a reference run, keyed by task_id."""
+    _, ref = read_json_data(_reference_file(from_dir, archetype, "responses"))
+    cols = [c for c in ref.columns if c.startswith(BELIEF_GEN_PREFIX)]
+    if not cols:
+        raise ValueError(f"--beliefs-from: no belief generations in {from_dir} for {archetype}")
+    ref = ref.set_index("task_id")
+    missing = [t for t in df["task_id"] if t not in ref.index]
+    if missing:
+        raise ValueError(
+            f"--beliefs-from: {len(missing)} task_ids of {archetype} absent from the reference run "
+            f"(e.g. {missing[:3]})"
+        )
+    for c in cols:
+        df[c] = [ref.at[t, c] for t in df["task_id"]]
+    print(
+        f"[mask/generate] {archetype}: {len(cols)} belief columns copied from {from_dir} "
+        f"({len(df)} rows) -- no belief elicitation for this arm"
+    )
+
+
 def _belief_k(archetype: str) -> Dict[str, int]:
     return {"1": 3} if archetype == "statistics" else {"1": 3, "2": 1, "3": 1}
 
@@ -171,7 +205,13 @@ def _process_archetype(
             df.at[idx, col] = _strip_and_tally(text, tally)
 
     # ---- Belief elicitation ----
-    if "belief_elicit_1" in df.columns:
+    if getattr(args, "beliefs_from", None):
+        # Grid convention (2026-09-13): every arm is scored against the BASE model's beliefs.
+        # Copy the belief generations from the reference run instead of eliciting them, so the
+        # consistent-belief scenario set is identical across arms and the judge only has to
+        # score the lying prompts (belief passes are 5 of the 6 per arm).
+        _copy_beliefs_from(df, Path(args.beliefs_from), archetype)
+    elif "belief_elicit_1" in df.columns:
         for be_num, k_value in _belief_k(archetype).items():
             belief_col = f"belief_elicit_{be_num}"
             if belief_col not in df.columns:
@@ -254,6 +294,7 @@ def run_generate(args: argparse.Namespace) -> None:
             "test": args.test,
             "sampling": sampling_dict(args),
             "enable_thinking": enable_thinking_value(args),
+            "beliefs_from": args.beliefs_from,
         },
     )
 
@@ -310,6 +351,13 @@ def add_args(parser: argparse.ArgumentParser) -> None:
         "--test",
         action="store_true",
         help="Use the 5-row test subset (data/mask/raw_test/) instead of the full benchmark",
+    )
+    parser.add_argument(
+        "--beliefs-from",
+        default=None,
+        help="Run dir of a reference (base-model) run whose belief generations are copied by "
+        "task_id instead of being elicited; the judge stage then copies their evaluations too. "
+        "Grid convention: every arm scored against the base model's beliefs.",
     )
     parser.add_argument(
         "--lora-adapter",
