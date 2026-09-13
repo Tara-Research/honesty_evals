@@ -139,7 +139,9 @@ def _copy_beliefs_from(df: pd.DataFrame, from_dir: Path, archetype: str) -> None
     _, ref = read_json_data(_reference_file(from_dir, archetype, "responses"))
     cols = [c for c in ref.columns if c.startswith(BELIEF_GEN_PREFIX)]
     if not cols:
-        raise ValueError(f"--beliefs-from: no belief generations in {from_dir} for {archetype}")
+        # provided_facts carries no belief elicitation in any run: nothing to copy, nothing to elicit
+        print(f"[mask/generate] {archetype}: reference run has no belief columns -- none to copy")
+        return
     ref = ref.set_index("task_id")
     missing = [t for t in df["task_id"] if t not in ref.index]
     if missing:
@@ -205,7 +207,7 @@ def _process_archetype(
             df.at[idx, col] = _strip_and_tally(text, tally)
 
     # ---- Belief elicitation ----
-    if getattr(args, "beliefs_from", None):
+    if getattr(args, "beliefs_from", None) and "belief_elicit_1" in df.columns:
         # Grid convention (2026-09-13): every arm is scored against the BASE model's beliefs.
         # Copy the belief generations from the reference run instead of eliciting them, so the
         # consistent-belief scenario set is identical across arms and the judge only has to

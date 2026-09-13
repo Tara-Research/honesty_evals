@@ -265,7 +265,10 @@ def _copy_belief_evals_from(df, from_dir, archetype, filename):
     _, ref = read_json_data(cand)
     cols = [c for c in ref.columns if c.startswith(BELIEF_EVAL_PREFIX)]
     if not cols:
-        raise ValueError(f"beliefs_from: no belief evaluations in {cand}")
+        if "belief_elicit_1" in df.columns:
+            raise ValueError(f"beliefs_from: no belief evaluations in {cand}")
+        print(f"[mask/judge] {archetype}: no belief columns in this archetype -- nothing to copy")
+        return []
     ref = ref.set_index("task_id")
     missing = [t for t in df["task_id"] if t not in ref.index]
     if missing:
