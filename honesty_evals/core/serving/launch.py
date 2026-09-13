@@ -17,7 +17,7 @@ from typing import Dict, List, Optional
 
 import httpx
 
-DEFAULT_STARTUP_TIMEOUT_S = 3600.0  # large models can take a long time to load
+DEFAULT_STARTUP_TIMEOUT_S = 6000.0  # large models + a cold FlashInfer/Triton JIT cache: the first LoRA-serving job of a day needed >1 h (job 462229)
 # Weight-sized allocations can take a while to be reclaimed by the driver after
 # the owning processes exit.
 DEFAULT_SHUTDOWN_TIMEOUT_S = 300.0
