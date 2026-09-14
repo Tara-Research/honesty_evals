@@ -70,3 +70,6 @@ def add_judge_args(parser: argparse.ArgumentParser) -> None:
     g.add_argument("--judge-model", default=None, help="Override judge model from configs/judge.yaml")
     g.add_argument("--judge-tp", type=int, default=None, help="Override judge tensor parallel size")
     g.add_argument("--reasoning-effort", default=None, help="Override judge reasoning effort")
+    g.add_argument("--judge-backend", default=None, choices=["vllm", "openai"],
+                   help="vllm (default): local in-job judge. openai: the OpenAI API (OPENAI_API_KEY); "
+                        "--judge-model is then the API model name")

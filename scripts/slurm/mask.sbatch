@@ -95,7 +95,16 @@ fi
 
 if has_stage judge; then
     echo "[2/4] judge"
-    honesty-evals mask judge --run-dir "$RUN_DIR"
+    # JUDGE_BACKEND=openai [JUDGE_MODEL=<api model>]: judge through the OpenAI API instead of the
+    # in-job vLLM judge (needs OPENAI_API_KEY; compute nodes reach the API via httpproxy). Unset =
+    # the local judge exactly as before.
+    judge_flags=()
+    if [ "${JUDGE_BACKEND:-}" = "openai" ]; then
+        module load httpproxy 2>/dev/null || true
+        judge_flags+=(--judge-backend openai)
+        [ -n "${JUDGE_MODEL:-}" ] && judge_flags+=(--judge-model "$JUDGE_MODEL")
+    fi
+    honesty-evals mask judge --run-dir "$RUN_DIR" "${judge_flags[@]}"
 fi
 
 if has_stage metrics; then

@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from honesty_evals.core.judge.judge import VllmJudge, load_judge_config
+from honesty_evals.core.judge.judge import VllmJudge, load_judge_config, make_judge
 from honesty_evals.core.run_manifest import load_manifest
 from honesty_evals.evals.mask.json_io import (
     discover_archetype_dirs,
@@ -556,8 +556,10 @@ def run_judge(args: argparse.Namespace) -> None:
         model=args.judge_model,
         tensor_parallel_size=args.judge_tp,
         reasoning_effort=args.reasoning_effort,
+        backend=getattr(args, "judge_backend", None),
     )
-    judge = VllmJudge(config)
+    judge = make_judge(config)
+    print(f"[mask/judge] backend={config.backend} model={config.model}", flush=True)
 
     for archetype in archetypes:
         for resp_file in discover_files_in_stage(run_dir, archetype, "responses"):
