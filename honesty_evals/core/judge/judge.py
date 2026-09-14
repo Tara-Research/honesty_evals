@@ -199,13 +199,20 @@ class OpenAIJudge:
     (model, sampling, messages) so an interrupted judge stage resumes for free. Reasoning
     effort is passed only when the API accepts it (o-series / gpt-5 style models)."""
 
+    OPENROUTER_URL = "https://openrouter.ai/api/v1"
+
     def __init__(self, config: JudgeConfig):
+        # OPENAI_API_KEY (+ optional OPENAI_BASE_URL), or OPENROUTER_API_KEY which implies the
+        # OpenRouter base URL; either may also live in ~/.openai_api_key / ~/.openrouter_api_key
+        for env, f in (("OPENAI_API_KEY", ".openai_api_key"), ("OPENROUTER_API_KEY", ".openrouter_api_key")):
+            if not os.environ.get(env) and (Path.home() / f).exists():
+                os.environ[env] = (Path.home() / f).read_text().strip()
+        if not os.environ.get("OPENAI_API_KEY") and os.environ.get("OPENROUTER_API_KEY"):
+            os.environ["OPENAI_API_KEY"] = os.environ["OPENROUTER_API_KEY"]
+            os.environ.setdefault("OPENAI_BASE_URL", self.OPENROUTER_URL)
         if not os.environ.get("OPENAI_API_KEY"):
-            key_file = Path.home() / ".openai_api_key"
-            if key_file.exists():
-                os.environ["OPENAI_API_KEY"] = key_file.read_text().strip()
-        if not os.environ.get("OPENAI_API_KEY"):
-            raise RuntimeError("OPENAI_API_KEY is not set (env or ~/.openai_api_key)")
+            raise RuntimeError("no API key: OPENAI_API_KEY or OPENROUTER_API_KEY (env or ~/.*_api_key file)")
+        self.openrouter = "openrouter" in os.environ.get("OPENAI_BASE_URL", "")
         self.config = config
         self.cache_dir = Path(os.environ.get("API_JUDGE_CACHE", str(Path.home() / ".cache/api_judge")))
         self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -252,7 +259,10 @@ class OpenAIJudge:
             async def call(msgs: List[Dict[str, str]]) -> Any:
                 kw: Dict[str, Any] = dict(model=self.config.model, messages=msgs, **self.sampling)
                 if self._reasoning_ok is not False and self.config.reasoning_effort:
-                    kw["reasoning_effort"] = self.config.reasoning_effort
+                    if self.openrouter:   # OpenRouter's unified reasoning parameter
+                        kw["extra_body"] = {"reasoning": {"effort": self.config.reasoning_effort}}
+                    else:
+                        kw["reasoning_effort"] = self.config.reasoning_effort
                 try:
                     r = await client.chat.completions.create(**kw)
                     if "reasoning_effort" in kw and self._reasoning_ok is None:
@@ -260,9 +270,9 @@ class OpenAIJudge:
                     return r
                 except Exception as e:  # noqa: BLE001
                     msg = str(e)
-                    if "reasoning_effort" in kw and ("reasoning_effort" in msg or "Unrecognized" in msg or "unsupported" in msg.lower()):
+                    if ("reasoning_effort" in kw or "extra_body" in kw) and ("reasoning" in msg or "Unrecognized" in msg or "unsupported" in msg.lower()):
                         self._reasoning_ok = False
-                        kw.pop("reasoning_effort")
+                        kw.pop("reasoning_effort", None); kw.pop("extra_body", None)
                         return await client.chat.completions.create(**kw)
                     if "max_tokens" in msg and "max_completion_tokens" in msg:
                         kw["max_completion_tokens"] = kw.pop("max_tokens")
