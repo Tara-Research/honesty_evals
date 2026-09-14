@@ -293,7 +293,7 @@ class OpenAIJudge:
                             break
                         except Exception as e:  # noqa: BLE001
                             msg = str(e)
-                            retriable = any(t in msg for t in ("429", "500", "502", "503", "504", "imeout", "overloaded", "Connection"))
+                            retriable = any(t in msg for t in ("429", "500", "502", "503", "504", "imeout", "imed out", "overloaded", "Connection"))
                             if attempt == 7 or not retriable:
                                 print(f"[openai-judge] call {i} failed: {msg[:200]}", flush=True)
                                 out[i] = ""
@@ -303,7 +303,10 @@ class OpenAIJudge:
                     if done % 200 == 0 or done == len(todo):
                         print(f"[openai-judge] {done}/{len(todo)} in {time.time() - t0:.0f}s", flush=True)
 
-            await asyncio.gather(*(one(i, m, f) for i, m, f in todo))
+            try:
+                await asyncio.gather(*(one(i, m, f) for i, m, f in todo))
+            finally:
+                await client.close()   # inside the loop: no "Event loop is closed" noise at exit
 
         if todo:
             asyncio.run(run())
