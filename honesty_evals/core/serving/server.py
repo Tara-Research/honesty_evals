@@ -15,6 +15,7 @@ Endpoints:
 from __future__ import annotations
 
 import argparse
+import os
 import uuid
 from typing import Dict, List, Optional
 
@@ -92,6 +93,15 @@ class GenerationServer:
             # record on tamia. Pass --no-enforce-eager to opt into CUDA graphs.
             "enforce_eager": enforce_eager,
         }
+        # GDN (linear-attention) prefill kernel. vLLM's default "flashinfer" JIT-compiles the
+        # sm90 kernels on first use; the compile runs inside the engine's profile step, holds a
+        # file lock in ~/.cache/flashinfer, and with several jobs starting at once it never
+        # finished inside the 6000 s health timeout (7 MASK jobs 466735-466740/466904 on
+        # 2026-09-17; the lone job the day before spent 4411 s there). "triton" skips the JIT
+        # (vLLM's own recommendation in the warning); numerics differ only at kernel level.
+        gdn = os.environ.get("HE_GDN_PREFILL_BACKEND", "triton").strip().lower()
+        if gdn and gdn != "auto":
+            engine_args["gdn_prefill_backend"] = gdn
         if max_model_len is not None:
             engine_args["max_model_len"] = max_model_len
         if loras:
