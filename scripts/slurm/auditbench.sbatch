@@ -61,7 +61,50 @@ export HF_HOME="${HF_HOME:-$SCRATCH/huggingface}"
 
 echo "[venv-build] building fresh venv on \$SLURM_TMPDIR: $AUDITBENCH_VENV"
 echo "[venv-build] (UV_CACHE_DIR=$UV_CACHE_DIR — wheels cached across jobs)"
-bash scripts/slurm/env/build_env_auditbench.sh
+
+# Retry the venv build. uv copies wheel contents out of the shared cache on
+# Lustre ($SCRATCH/.uv-cache) into the node-local venv; hardlinking is
+# impossible across those filesystems, so it full-copies tens of thousands of
+# small files and an occasional read comes back ENOENT:
+#
+#   error: Failed to install: plotly-6.0.1-py3-none-any.whl
+#     Caused by: failed to copy file from $SCRATCH/.uv-cache/archive-v0/.../_line.py
+#     ... No such file or directory (os error 2)
+#
+# The file is present on later inspection, so this is transient Lustre, not a
+# corrupt cache. Without a retry that single read kills the whole 12h job at
+# startup — it took out 7 of 13 jobs in the 2026-08-04 SFT-Adv sweep (see
+# 10279895..10279902). Preemption compounds it: every requeue re-runs this
+# build and buys another roll of the dice.
+#
+# Each attempt starts from an empty directory on purpose. Retrying in place
+# over a venv that died mid-copy risks a subtly half-installed env, which
+# fails later and far less legibly than a clean crash. A rebuild costs ~2 min
+# against a 12h job.
+# VENV_BUILD_RETRIES was 3 until 2026-08-14. Three was enough while roughly 1
+# attempt in 7 hit the Lustre flake, but the rate scales with cluster load: the
+# transcripts-KTO launch lost 6 of 14 jobs at once (10390521/25/27/28/29/32),
+# every one of them burning all three attempts in under 4 minutes without ever
+# touching a GPU. A whole 12h allocation dies for want of ~1 min of retry, so
+# the ceiling is deliberately generous and overridable per-job.
+_build_venv() {
+    local attempt max="${VENV_BUILD_RETRIES:-6}"
+    for attempt in $(seq 1 "$max"); do
+        rm -rf "$AUDITBENCH_VENV"
+        bash scripts/slurm/env/build_env_auditbench.sh && {
+            [ "$attempt" -gt 1 ] && echo "[venv-build] succeeded on attempt $attempt/$max"
+            return 0
+        }
+        echo "[venv-build] build failed (attempt $attempt/$max) — retrying" >&2
+        # Capped linear backoff. Uncapped attempt*20 would reach 2 min by the
+        # 6th try; the flake is transient Lustre contention, so waiting longer
+        # than ~1 min buys nothing.
+        sleep $(( attempt * 20 > 60 ? 60 : attempt * 20 ))
+    done
+    return 1
+}
+_build_venv || { echo "[venv-build] FATAL: venv build failed after ${VENV_BUILD_RETRIES:-6} attempts" >&2; exit 1; }
+
 source "$AUDITBENCH_VENV/bin/activate"
 
 # Source safetytooling's .env into the sbatch env so subprocesses inherit it
@@ -132,7 +175,14 @@ PY
 TP="${TP:-4}"
 N_RUNS="${N_RUNS:-1}"
 N_TURNS="${N_TURNS:-}"
-PORT=8192
+# Per-job port, derived from the SLURM job ID. A fixed port (was 8192) collides
+# whenever two audit jobs share a node: the second job's health check succeeds
+# against the FIRST job's server, then the audit dies with
+# "Generation server ... has no LoRA named <its own repo>". That happened to 22
+# of 28 jobs in the v2 sweep, because `long` is preemptible and requeued jobs
+# get repacked onto nodes that already host a server.
+# Range 20000-59999 — above the ephemeral-port floor, below 60000.
+PORT="${PORT:-$(( 20000 + (${SLURM_JOB_ID:-0} % 40000) ))}"
 
 HONESTY_LORA_REPO="${HONESTY_LORA_REPO:-}"
 HONESTY_LORA_SCALE="${HONESTY_LORA_SCALE:-1.0}"

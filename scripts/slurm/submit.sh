@@ -50,4 +50,27 @@ for kv in "$@"; do
     esac
 done
 
-sbatch "${SUBMIT_ARGS[@]}" --export=ALL "$SBATCH_SCRIPT"
+# EXTRA_SBATCH_ARGS: whitespace-separated sbatch flags appended after the
+# profile's SUBMIT_ARGS, so they win on any duplicated flag. Deliberately not a
+# VAR=value pair — those go into the job environment, and these must reach
+# sbatch itself.
+#
+# The motivating case is preemption. On Mila the a100l nodes belong to long
+# (PriorityTier=10), main (100) and unkillable (1000) at once, and
+# PreemptType=preempt/partition_prio with PreemptExemptTime=0 means any
+# higher-tier job evicts ours instantly — one 1-GPU unkillable request displaces
+# our whole 4-GPU job. cn-d003/cn-d004 are the only a100l nodes NOT in
+# main/unkillable (Partitions=long,long-grace, and long-grace is also tier 10,
+# so it cannot preempt us either), which makes them the only preemption-safe
+# 4xA100L capacity on the cluster:
+#
+#   EXTRA_SBATCH_ARGS='--nodelist=cn-d003,cn-d004' bash scripts/slurm/submit.sh ...
+#
+# Trade-off: 2 nodes instead of ~29, so jobs queue for a slot rather than
+# starting promptly. Worth it when a run cannot survive interruption.
+read -r -a _EXTRA_SBATCH <<< "${EXTRA_SBATCH_ARGS:-}"
+if [ "${#_EXTRA_SBATCH[@]}" -gt 0 ]; then
+    echo "[submit] extra sbatch args: ${_EXTRA_SBATCH[*]}"
+fi
+
+sbatch "${SUBMIT_ARGS[@]}" "${_EXTRA_SBATCH[@]}" --export=ALL "$SBATCH_SCRIPT"

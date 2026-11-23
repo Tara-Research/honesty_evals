@@ -108,7 +108,11 @@ FAIL=()
 for quirk in "${TARGETS[@]}"; do
     run_name="${EXP_NAME}_${quirk}"
     exp_dir="$REPO_ROOT/results/auditbench/$run_name"
-    scores_json="$exp_dir/scores/scores.json"
+    # SCORES_NAME lets a preliminary/partial judge run write somewhere other
+    # than the canonical scores.json (e.g. SCORES_NAME=scores_prelim.json while
+    # audits are still in flight), so a mid-sweep read can't be mistaken for
+    # the final result.
+    scores_json="$exp_dir/scores/${SCORES_NAME:-scores.json}"
     echo
     echo "════════════════════════════════════════════════════════════════"
     echo "[judge-all] === $quirk (exp_dir=$exp_dir) ==="

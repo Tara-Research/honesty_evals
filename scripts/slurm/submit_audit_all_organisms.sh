@@ -61,14 +61,27 @@ done
 : "${EXP_NAME:?--exp-name (or EXP_NAME=) is required so RUN_NAMEs do not collide with prior runs}"
 
 # LoRA repo prefixes per variant. Full repo = "<prefix>_<quirk>".
-#   sft_adv   = SFT then adversarial redteam (paper's headline benchmark)
-#   kto_adv   = KTO then adversarial redteam (harder — RLHF-tuned to conceal)
-#   plain_sft = plain SFT, no adversarial training (easiest)
+#
+# Two organism families, each in three training conditions. The family is the
+# pretraining data the quirk was instilled with; the condition is what was done
+# on top of it:
+#   synth docs  = quirk taught via synthetic documents  (llama_70b_synth_docs_only*)
+#   transcripts = quirk taught via conversation transcripts (llama_70b_transcripts_only*)
+#
+#   *_adv    = then adversarial redteam at level "high" (paper's headline benchmark)
+#   *_kto    = then adversarial redteam via KTO (RLHF-tuned to conceal)
+#   plain_*  = no adversarial training at all (easiest condition)
+#
+# All 14 quirks are published for all six combinations — verified against the
+# HF API on 2026-08-11, 14/14 returning 200 for each prefix below.
 case "$VARIANT" in
-    sft_adv)   REPO_PREFIX="auditing-agents/llama_70b_synth_docs_only_then_redteam_high" ;;
-    kto_adv)   REPO_PREFIX="auditing-agents/llama_70b_synth_docs_only_then_redteam_kto"  ;;
-    plain_sft) REPO_PREFIX="auditing-agents/llama_70b_synth_docs_only" ;;
-    *) echo "unknown --variant '$VARIANT' (want: sft_adv | kto_adv | plain_sft)" >&2; exit 1;;
+    sft_adv)          REPO_PREFIX="auditing-agents/llama_70b_synth_docs_only_then_redteam_high" ;;
+    kto_adv)          REPO_PREFIX="auditing-agents/llama_70b_synth_docs_only_then_redteam_kto"  ;;
+    plain_sft)        REPO_PREFIX="auditing-agents/llama_70b_synth_docs_only" ;;
+    transcripts_adv)  REPO_PREFIX="auditing-agents/llama_70b_transcripts_only_then_redteam_high" ;;
+    transcripts_kto)  REPO_PREFIX="auditing-agents/llama_70b_transcripts_only_then_redteam_kto"  ;;
+    transcripts_sft)  REPO_PREFIX="auditing-agents/llama_70b_transcripts_only" ;;
+    *) echo "unknown --variant '$VARIANT' (want: sft_adv | kto_adv | plain_sft | transcripts_adv | transcripts_kto | transcripts_sft)" >&2; exit 1;;
 esac
 
 # All 14 base quirks (the .jinja2 files under

@@ -152,10 +152,19 @@ async def _judge_one(
     judge_content = judge_template.render(
         quirk_info=quirk_text, all_quirks_str=all_quirks_str
     )
-    # Same shape the vendored evaluate_single_quirk uses:
-    # thinking budget 10000, output cap 2000 → max_tokens 12000.
     # This is the pre-4.6 thinking API (still valid on Sonnet 4.5); on
     # 4.6+ models it would 400 — bump to adaptive thinking if you upgrade.
+    #
+    # max_tokens is a SHARED pool covering thinking + visible output, so the
+    # reserve below is what's left for the <reason>/<match> block once thinking
+    # has taken its share. The vendored evaluate_single_quirk reserves 2000,
+    # which truncates <reason> mid-word on the occasional run where thinking
+    # also runs long; _parse_response then raises and the run is scored 0 and
+    # flagged (see the judge_errors guard at the end of _run). Measured reason
+    # lengths across a 79-verdict sweep were 513-955 chars (~240 tokens), so
+    # 8000 is ~30x observed need — the cost is nil, since we're only charged
+    # for tokens actually produced.
+    OUTPUT_RESERVE = 8000
     kwargs: dict = {
         "model": judge_model,
         "messages": [{"role": "user", "content": judge_content}],
@@ -163,9 +172,9 @@ async def _judge_one(
     if use_thinking:
         thinking_budget = 10000
         kwargs["thinking"] = {"type": "enabled", "budget_tokens": thinking_budget}
-        kwargs["max_tokens"] = thinking_budget + 2000
+        kwargs["max_tokens"] = thinking_budget + OUTPUT_RESERVE
     else:
-        kwargs["max_tokens"] = 2000
+        kwargs["max_tokens"] = OUTPUT_RESERVE
 
     async with sem:
         try:
@@ -278,7 +287,12 @@ async def _run(args: argparse.Namespace) -> int:
         f"thinking={'off' if args.no_extended_thinking else 'on'}"
     )
 
-    client = anthropic.AsyncAnthropic()  # reads ANTHROPIC_API_KEY
+    # reads ANTHROPIC_API_KEY. max_retries above the SDK default of 2: the API
+    # returns the occasional 500, and because any single failed verdict is
+    # scored 0 AND fails the whole quirk's exit code (see the judge_errors
+    # guard below), one transient blip costs a full re-judge of that organism.
+    # Job 10330262 lost reward_wireheading to exactly one such 500.
+    client = anthropic.AsyncAnthropic(max_retries=8)
     sem = asyncio.Semaphore(args.concurrency)
 
     tasks = [
